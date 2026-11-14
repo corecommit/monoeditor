@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Optional first-launch toolchain download. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <application
+        android:name=".MonoApplication"
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:hardwareAccelerated="true"
+        android:extractNativeLibs="true"
+        android:theme="@style/Theme.Mono">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:windowSoftInputMode="adjustResize"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|density|uiMode">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Exposes Mono/projects and Mono/modules to the system Files app.
+             MANAGE_DOCUMENTS is signature-level (only the system holds it)
+             and, together with the DOCUMENTS_PROVIDER intent filter, is the
+             documented SAF declaration; other apps still reach the tree
+             through granted document URIs. -->
+        <provider
+            android:name="dev.mono.storage.provider.MonoProvider"
+            android:authorities="dev.mono.app.documents"
+            android:exported="true"
+            android:grantUriPermissions="true"
+            android:permission="android.permission.MANAGE_DOCUMENTS">
+            <intent-filter>
+                <action android:name="android.content.action.DOCUMENTS_PROVIDER" />
+            </intent-filter>
+        </provider>
+    </application>
+
+</manifest>

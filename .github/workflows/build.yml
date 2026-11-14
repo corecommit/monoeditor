@@ -1,0 +1,144 @@
+name: build
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    name: Build APK (ubuntu)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # NOTE: we deliberately do NOT use android-actions/setup-android here.
+      # That action still runs `sdkmanager tools` internally, and Google has
+      # removed the legacy "tools" package from the SDK repository, so the
+      # step fails with "Failed to find package 'tools'" (exit code 1). The
+      # hosted ubuntu runner already ships a preinstalled SDK (ANDROID_HOME
+      # is /usr/local/lib/android/sdk, with cmdline-tools), which we use
+      # directly. The NDK is not needed: this build compiles no native code
+      # with Gradle, and the on-device toolchain is downloaded from the
+      # Termux repositories by toolchain/setup-toolchain.sh.
+      - name: Install SDK packages
+        run: |
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          SDKMANAGER="${SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="$(find "${SDK_ROOT}/cmdline-tools" -type f -name sdkmanager 2>/dev/null | sort | head -n 1 || true)"
+          fi
+          if [ -z "${SDKMANAGER:-}" ] || [ ! -x "$SDKMANAGER" ]; then
+            echo "sdkmanager not found under ${SDK_ROOT}" >&2
+            exit 1
+          fi
+          echo "Using sdkmanager: ${SDKMANAGER}"
+          yes | "$SDKMANAGER" --licenses > /dev/null || true
+          "$SDKMANAGER" --install "platforms;android-34" "build-tools;34.0.0" > /dev/null
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.7'
+
+      # The wrapper jar is committed with the repo; this guard keeps CI working
+      # even for consumers who strip jar files from their checkouts.
+      - name: Bootstrap Gradle wrapper (if jar missing)
+        run: |
+          if [ ! -f gradle/wrapper/gradle-wrapper.jar ]; then
+            gradle wrapper --gradle-version 8.7 --distribution-type bin
+          fi
+          chmod +x gradlew
+
+      - name: Install toolchain script dependencies
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends zstd binutils xz-utils zip patchelf
+
+      # Downloads an aarch64-hosted clang/lld (Termux packages), the bionic
+      # sysroot, and assembles the app jniLibs + assets. Every jniLibs file
+      # is renamed/patched to the extractable lib*.so form and verified
+      # (naming, ELF64/AArch64, NEEDED dependency closure, libc++ presence,
+      # sysroot contents) with a printed summary. The step is fatal: shipping
+      # an APK with a silently broken toolchain is worse than not shipping.
+      - name: Provision on-device clang toolchain
+        run: |
+          ./toolchain/setup-toolchain.sh
+
+      - name: Prepare signing material
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "Using keystore from repository secrets."
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+            echo "MONO_KEYSTORE_FILE=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
+            echo "MONO_KEYSTORE_PASSWORD=$KEY_PASSWORD" >> "$GITHUB_ENV"
+            echo "MONO_KEY_ALIAS=$KEY_ALIAS" >> "$GITHUB_ENV"
+            echo "MONO_KEY_PASSWORD=$KEY_PASSWORD" >> "$GITHUB_ENV"
+          else
+            echo "No signing secrets found; generating a fresh CI debug keystore."
+            keytool -genkeypair -v \
+              -keystore "$RUNNER_TEMP/release.keystore" \
+              -storetype PKCS12 \
+              -storepass mono-ci \
+              -alias mono \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=Mono CI, OU=Build, O=Mono, C=US"
+            echo "MONO_KEYSTORE_FILE=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
+            echo "MONO_KEYSTORE_PASSWORD=mono-ci" >> "$GITHUB_ENV"
+            echo "MONO_KEY_ALIAS=mono" >> "$GITHUB_ENV"
+            echo "MONO_KEY_PASSWORD=mono-ci" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build debug APK
+        run: ./gradlew --no-daemon assembleDebug
+
+      - name: Build release APK (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: ./gradlew --no-daemon assembleRelease
+
+      - name: Upload debug APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mono-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      - name: Upload toolchain archive artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mono-toolchain-arm64
+          path: toolchain/work/sysroot-only.zip
+          if-no-files-found: warn
+
+      - name: Upload release APK artifact
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v4
+        with:
+          name: mono-release-apk
+          path: app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+
+      - name: Create GitHub Release with APK (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            app/build/outputs/apk/release/app-release.apk
+            toolchain/work/sysroot-only.zip
