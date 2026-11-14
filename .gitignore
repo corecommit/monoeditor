@@ -1,6 +1,15 @@
 # Gradle
+# NOTE: build outputs are ignored per module root only. A bare "build/"
+# pattern would also ignore the source package
+# core-compiler/src/main/kotlin/dev/mono/compiler/build/ (BuildEngine.kt),
+# silently dropping it from version control.
 .gradle/
-build/
+/build/
+app/build/
+core-editor/build/
+core-indexer/build/
+core-compiler/build/
+core-storage/build/
 !gradle/wrapper/gradle-wrapper.jar
 
 # Local configuration

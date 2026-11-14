@@ -74,9 +74,9 @@ built Android clang) plus the bionic sysroot:
 ./toolchain/setup-toolchain.sh    # provisions jniLibs + assets, then rebuild
 ```
 
-- Needs `curl`, `ar` (binutils), `tar`, `readelf`, `zstd`, `xz`, `zip`;
-  `patchelf` additionally when a dependency carries a versioned soname
-  (the script renames the file to `lib*.so` and patches every NEEDED
+- Needs `curl`, `ar` (binutils), `tar`, `readelf`, `zstd`, `xz`, `zip`,
+  `python3`; `patchelf` additionally when a dependency carries a versioned
+  soname (the script renames the file to `lib*.so` and patches every NEEDED
   reference to it).
 - Environment overrides: `TERMUX_MIRROR`, `SKIP_SYSROOT=1`.
 - Writes:

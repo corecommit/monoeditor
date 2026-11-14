@@ -60,16 +60,33 @@ TARGET_API="26"
 SEED_PACKAGES=(clang lld ndk-sysroot ndk-multilib libc++)
 
 log() { printf '\033[1;37m[toolchain]\033[0m %s\n' "$*"; }
-die() { printf '\033[1;37m[toolchain]\033[0m \033[1mFAILED:\033[0m %s\n' "$*" >&2; exit 1; }
+
+# Report unexpected exits (set -e firing on an unguarded command) with the
+# line number, so a failure is never silent — an exit-code-1 with no message
+# is undebuggable in CI logs. die() raises a flag so its own exit path is
+# reported exactly once.
+MONO_DIED=0
+die() {
+  MONO_DIED=1
+  printf '\033[1;37m[toolchain]\033[0m \033[1mFAILED:\033[0m %s\n' "$*" >&2
+  exit 1
+}
+trap '
+  rc=$?
+  if [ "$rc" -ne 0 ] && [ "$MONO_DIED" -eq 0 ]; then
+    printf "\033[1;37m[toolchain]\033[0m \033[1mFAILED:\033[0m unexpected exit (status %s) at %s:%s\n" \
+      "$rc" "${0##*/}" "$LINENO" >&2
+  fi
+' EXIT
 
 require_tools() {
   local missing=()
-  for t in curl ar tar readelf sha256sum awk find cp mkdir rm; do
+  for t in curl ar tar readelf sha256sum awk find cp mkdir rm zip python3; do
     command -v "$t" >/dev/null 2>&1 || missing+=("$t")
   done
   command -v zcat >/dev/null 2>&1 || missing+=(zcat)
   if [ "${#missing[@]}" -gt 0 ]; then
-    die "missing required tools: ${missing[*]} (on Debian/Ubuntu: sudo apt-get install -y curl binutils xz-utils zstd zip patchelf)"
+    die "missing required tools: ${missing[*]} (on Debian/Ubuntu: sudo apt-get install -y curl binutils xz-utils zstd zip patchelf python3)"
   fi
 }
 
@@ -202,7 +219,12 @@ provision_binaries() {
   local clang ld
   clang="$(first_real_file 'clang-[0-9]*' "${ROOT_USR}/bin")" \
     || die "clang binary not found in extracted packages"
-  ld="$(first_real_file 'ld.lld-[0-9]*' "${ROOT_USR}/bin")"
+  # Termux's lld package ships only unversioned names (ld.lld -> lld), so the
+  # versioned probe may legitimately find nothing. The trailing `|| true`
+  # keeps set -e from terminating the script silently on that miss — the
+  # unversioned fallback below then resolves ld.lld, and the final check
+  # reports a genuine absence with a clear message.
+  ld="$(first_real_file 'ld.lld-[0-9]*' "${ROOT_USR}/bin" || true)"
   if [ -z "$ld" ]; then
     # ld.lld is sometimes an unversioned symlink/file.
     if [ -f "${ROOT_USR}/bin/ld.lld" ]; then
@@ -236,14 +258,21 @@ provision_binaries() {
   # them at runtime. Names that do not match lib*.so are fixed up afterwards
   # by sanitize_jnilibs.
   local -a queue=("${JNILIBS}/libclang.so" "${JNILIBS}/libld_lld.so" "${JNILIBS}/libc++_shared.so")
-  local -A copied=()
+  # Two distinct sets: `scanned` guards the readelf walk (each library's
+  # NEEDED entries are inspected exactly once) and `bundled` guards the
+  # search/copy (each soname is resolved once even when several libraries
+  # need it). Conflating them truncates the walk at depth one — a dependency
+  # marked at queue time would be skipped at dequeue and its own NEEDED
+  # entries (e.g. libLLVM.so -> libffi.so, libxml2.so.16) never followed.
+  local -A scanned=()
+  local -A bundled=([libclang.so]=1 [libld_lld.so]=1 [libc++_shared.so]=1)
   while [ "${#queue[@]}" -gt 0 ]; do
     local so="${queue[0]}"
     queue=("${queue[@]:1}")
     local base
     base="$(basename "${so}")"
-    [ -n "${copied[${base}]:-}" ] && continue
-    copied[$base]=1
+    [ -n "${scanned[${base}]:-}" ] && continue
+    scanned[$base]=1
     local needed
     needed="$(readelf -d "${so}" 2>/dev/null | awk '/NEEDED/ { gsub(/[][]/,"",$NF); print $NF }' || true)"
     local n
@@ -251,7 +280,8 @@ provision_binaries() {
       case "$n" in
         libc.so|libc.so.*|libm.so|libm.so.*|libdl.so|libdl.so.*|librt.so*|ld-android.so|linker64) continue ;;
       esac
-      if [ -n "${copied[$n]:-}" ]; then continue; fi
+      if [ -n "${bundled[$n]:-}" ]; then continue; fi
+      bundled[$n]=1
       local found=""
       local cand2
       for cand2 in "${ROOT_USR}/lib/${n}" "${ROOT_USR}/lib64/${n}"; do
@@ -266,7 +296,6 @@ provision_binaries() {
       if [ -n "$found" ]; then
         cp -f "${found}" "${JNILIBS}/${n}"
         queue+=("${JNILIBS}/${n}")
-        copied[$n]=1
       else
         log "  warning: NEEDED library '${n}' not found in packages (may be provided by the system)"
       fi
@@ -450,8 +479,19 @@ assemble_sysroot() {
   if [ -d "${ROOT_USR}/include" ]; then
     cp -R "${ROOT_USR}/include/." "${SYSROOT}/usr/include/"
   fi
-  local clangres
-  clangres="$(find "${ROOT_USR}/lib" -maxdepth 2 -type d -path '*clang*' -name include -print -quit 2>/dev/null || true)"
+  local clangres=""
+  local d
+  # Termux layout: usr/lib/clang/<major>/include (depth 3 from lib/, so a
+  # shallow find cannot see it). Probe the known shape first, then fall back
+  # to a find deep enough to cover both the major-only and full-version
+  # layouts. BuildEngine passes -resource-dir=<sysroot>/resource, and without
+  # these headers every on-device compile dies on <stddef.h> & friends.
+  for d in "${ROOT_USR}/lib/clang/"*/include; do
+    if [ -d "$d" ]; then clangres="$d"; break; fi
+  done
+  if [ -z "$clangres" ]; then
+    clangres="$(find "${ROOT_USR}/lib" -maxdepth 4 -type d -path '*clang*' -name include -print -quit 2>/dev/null || true)"
+  fi
   if [ -n "$clangres" ] && [ -d "$clangres" ]; then
     mkdir -p "${SYSROOT}/resource/include"
     cp -R "${clangres}/." "${SYSROOT}/resource/include/"
@@ -460,9 +500,11 @@ assemble_sysroot() {
     log "warning: clang builtin headers (resource dir) not found"
   fi
 
-  # crt objects: from ndk-multilib. Probe known layouts.
+  # crt objects: from ndk-multilib. Probe known layouts (Termux keeps them
+  # under usr/aarch64-linux-android/lib, NDK-style sysroots under
+  # usr/lib/aarch64-linux-android) before falling back to a global find.
   local crt_src=""
-  for d in "${ROOT_USR}/lib/aarch64-linux-android" "${ROOT_USR}/lib"; do
+  for d in "${ROOT_USR}/lib/aarch64-linux-android" "${ROOT_USR}/aarch64-linux-android/lib" "${ROOT_USR}/lib"; do
     if [ -f "${d}/crtbegin_dynamic.o" ]; then crt_src="$d"; break; fi
   done
   if [ -z "$crt_src" ]; then
@@ -522,8 +564,9 @@ verify_sysroot() {
     log "  FAIL  libc++:  libc++_shared.so missing from sysroot"
     failures=$((failures + 1))
   fi
-  if [ ! -d "${SYSROOT}/resource/include" ]; then
-    log "  note: no clang resource headers (builtin <stddef.h> etc. may be missing)"
+  if [ ! -f "${SYSROOT}/resource/include/stddef.h" ]; then
+    log "  FAIL  builtins: clang resource headers missing (sysroot/resource/include/stddef.h)"
+    failures=$((failures + 1))
   fi
 
   if [ "$failures" -ne 0 ]; then
@@ -535,6 +578,7 @@ verify_sysroot() {
   log "-------- sysroot verification summary --------"
   log "  files:        ${n_files}"
   log "  headers:      bionic + libc++ (usr/include/c++/v1) present"
+  log "  builtins:     clang resource headers present (resource/include)"
   log "  crt objects:  present in usr/lib/aarch64-linux-android (flat + per-API)"
   log "  libc++:       libc++_shared.so present"
   log "------------------------------------------------"
@@ -595,6 +639,9 @@ main() {
   download_and_extract "${RESOLVED_PACKAGES[@]}"
   provision_binaries
   sanitize_jnilibs
+  # The .deb payloads carry assorted modes (some 0600); everything in
+  # nativeLibraryDir must be executable/loadable on device — normalise.
+  chmod 0755 "${JNILIBS}"/*
   verify_jnilibs
   if [ "${SKIP_SYSROOT:-0}" != "1" ]; then
     assemble_sysroot
