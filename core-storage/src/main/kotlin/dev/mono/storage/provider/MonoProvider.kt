@@ -157,14 +157,13 @@ class MonoProvider : DocumentsProvider() {
 
     override fun copyDocument(
         sourceDocumentId: String?,
-        targetParentDocumentId: String?,
-        displayName: String?
+        targetParentDocumentId: String?
     ): String? {
         if (sourceDocumentId == null || targetParentDocumentId == null) return null
         val source = fileFor(sourceDocumentId)
         val targetParent = fileFor(targetParentDocumentId)
         if (!source.exists() || !targetParent.isDirectory) return null
-        val name = safeName(displayName) ?: source.name
+        val name = source.name
         val target = File(targetParent, name)
         if (target.exists()) return null
         return try {
@@ -186,15 +185,14 @@ class MonoProvider : DocumentsProvider() {
     override fun moveDocument(
         sourceDocumentId: String?,
         sourceParentDocumentId: String?,
-        targetParentDocumentId: String?,
-        displayName: String?
+        targetParentDocumentId: String?
     ): String? {
         if (sourceDocumentId == null || targetParentDocumentId == null) return null
         if (sourceDocumentId == DOC_ROOT) return null
         val source = fileFor(sourceDocumentId)
         val targetParent = fileFor(targetParentDocumentId)
         if (!source.exists() || !targetParent.isDirectory) return null
-        val name = safeName(displayName) ?: source.name
+        val name = source.name
         val target = File(targetParent, name)
         if (target.exists()) return null
         if (!source.renameTo(target)) return null
