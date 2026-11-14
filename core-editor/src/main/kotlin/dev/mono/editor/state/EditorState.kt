@@ -167,6 +167,9 @@ class EditorState(initialText: String = "") {
     // Selection handles.
     var showHandles by mutableStateOf(false)
 
+    // Floating Cut / Copy / Paste / Select all menu.
+    var showSelectionMenu by mutableStateOf(false)
+
     // IME.
     var imeVisible by mutableStateOf(false)
     var hasFocus by mutableStateOf(false)
@@ -197,6 +200,7 @@ class EditorState(initialText: String = "") {
             anchorCol = -1
         }
         showHandles = false
+        showSelectionMenu = false
     }
 
     val hasSelection: Boolean get() = anchorLine != -1

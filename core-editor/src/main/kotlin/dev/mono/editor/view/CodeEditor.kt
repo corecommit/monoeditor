@@ -123,6 +123,7 @@ fun MonoEditor(
     }
     LaunchedEffect(state.textRevision) {
         state.contentMaxWidthPx = 0f
+        state.showSelectionMenu = false
     }
 
     // ---- caret animation --------------------------------------------------------
@@ -392,6 +393,34 @@ fun MonoEditor(
                 }
             }
         }
+
+        if (state.showSelectionMenu && !state.completionVisible) {
+            val bounds = state.selectionBounds()
+            val startPos = bounds?.first ?: Pos(state.caretLine, state.caretCol)
+            val endPos = bounds?.second ?: startPos
+            val startEntry = cache.layout(state, theme, textMeasurer, startPos.line)
+            val endEntry = cache.layout(state, theme, textMeasurer, endPos.line)
+            with(density) {
+                val textLeft = state.gutterWidthPx + padH(density)
+                val x1 = textLeft + startEntry.xAt(startPos.col) - state.scrollX
+                val x2 = textLeft + endEntry.xAt(endPos.col) - state.scrollX
+                val centerX = if (startPos.line == endPos.line) (x1 + x2) / 2f else state.viewportWidthPx / 2f
+                val aboveY = startPos.line * state.lineHeightPx - state.scrollY - 6.dp.toPx()
+                val belowY = (endPos.line + 1) * state.lineHeightPx - state.scrollY + 28.dp.toPx()
+                Popup(
+                    popupPositionProvider = SelectionMenuPositioner(
+                        centerX = centerX.roundToInt(),
+                        aboveY = aboveY.roundToInt(),
+                        belowY = belowY.roundToInt(),
+                        margin = 4.dp.roundToPx()
+                    ),
+                    onDismissRequest = { state.showSelectionMenu = false },
+                    properties = PopupProperties(focusable = false)
+                ) {
+                    SelectionMenu(state, controller, theme)
+                }
+            }
+        }
     }
 }
 
@@ -429,6 +458,7 @@ private fun Modifier.pointerInputGestures(
         // themselves so the tap test compares against the same clock the
         // down time came from (never System.currentTimeMillis()).
         var lastChangeTime = downTime
+        val menuWasShown = state.showSelectionMenu
 
         stopFling()
         velocityTracker.resetTracking()
@@ -453,6 +483,7 @@ private fun Modifier.pointerInputGestures(
                 // Timeout during a still press: long-press selects the word.
                 if (waiting) {
                     longPressed = true
+                    state.showSelectionMenu = false
                     val p = charPosAt(downPos)
                     controller.beginSelectionAt(p.line, p.col, word = true)
                 }
@@ -470,6 +501,7 @@ private fun Modifier.pointerInputGestures(
             if (pressed.size >= 2) {
                 multi = true
                 moved = true
+                state.showSelectionMenu = false
                 val zoom = event.calculateZoom()
                 val centroid = event.calculateCentroid()
                 if (zoom != 1f) applyZoom(zoom, centroid)
@@ -486,6 +518,7 @@ private fun Modifier.pointerInputGestures(
             lastChangeTime = change.uptimeMillis
             val pos = change.position
             if (!moved && (pos - downPos).getDistance() > slop) moved = true
+            if (moved || handleDrag != 0) state.showSelectionMenu = false
 
             if (handleDrag != 0) {
                 val target = charPosAt(pos)
@@ -514,6 +547,9 @@ private fun Modifier.pointerInputGestures(
         }
 
         // ---- release ----
+        if (longPressed || handleDrag != 0) {
+            state.showSelectionMenu = state.hasSelection
+        }
         if (!moved && !longPressed && handleDrag == 0) {
             val diag = diagnosticAt(downPos)
             if (diag != null) {
@@ -521,7 +557,11 @@ private fun Modifier.pointerInputGestures(
             } else if (lastChangeTime - downTime < 420) {
                 state.diagnosticChip = null
                 val target = charPosAt(downPos)
+                // Tapping the caret again toggles the Paste / Select all menu.
+                val onCaret = !state.hasSelection &&
+                    target.line == state.caretLine && target.col == state.caretCol
                 controller.moveCaret(target.line, target.col)
+                state.showSelectionMenu = onCaret && !menuWasShown
                 state.hasFocus = true
                 state.requestIme?.invoke(true)
             }

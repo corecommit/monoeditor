@@ -135,20 +135,31 @@ class ToolchainManager(private val context: Context) {
                 _status.value = st
                 return@withContext st
             }
-            // Copy info.json alongside for the Ready label.
+            // The zip holds sysroot/ + manifest.json at its root, so the real
+            // sysroot is staging/sysroot (not staging itself).
+            val sysrootInStage = File(staging, "sysroot")
+            if (!sysrootInStage.isDirectory) {
+                staging.deleteRecursively()
+                val st = Status.Error("bundled sysroot.zip has no sysroot/ folder")
+                _status.value = st
+                return@withContext st
+            }
+            // info.json lives next to the sysroot (readCompilerName reads it there).
             runCatching {
+                toolchainDir.mkdirs()
                 assets.open("toolchain/info.json").use { input ->
-                    File(staging, "info.json").outputStream().use { input.copyTo(it) }
+                    File(toolchainDir, "info.json").outputStream().use { input.copyTo(it) }
                 }
             }
-            // Atomic-ish swap.
             val final = sysrootDir
             final.deleteRecursively()
-            if (!staging.renameTo(final)) {
+            if (!sysrootInStage.renameTo(final)) {
+                staging.deleteRecursively()
                 val st = Status.Error("could not move extracted sysroot into place")
                 _status.value = st
                 return@withContext st
             }
+            staging.deleteRecursively()
             File(final, ".verified").writeText("ok")
             val st = Status.Ready(readCompilerName())
             _status.value = st
