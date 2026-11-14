@@ -120,28 +120,6 @@ jobs:
         if: github.event_name != 'pull_request'
         run: ./gradlew --no-daemon assembleRelease
 
-      - name: Upload debug APK artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: mono-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
-
-      - name: Upload toolchain archive artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: mono-toolchain-arm64
-          path: toolchain/work/sysroot-only.zip
-          if-no-files-found: warn
-
-      - name: Upload release APK artifact
-        if: github.event_name != 'pull_request'
-        uses: actions/upload-artifact@v4
-        with:
-          name: mono-release-apk
-          path: app/build/outputs/apk/release/app-release.apk
-          if-no-files-found: error
-
       # Rolling release: every push to main moves the "latest" tag to the
       # new commit and replaces the APK on the "latest" GitHub Release.
       - name: Move "latest" tag to this commit (main only)
