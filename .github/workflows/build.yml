@@ -73,8 +73,10 @@ jobs:
       # (naming, ELF64/AArch64, NEEDED dependency closure, libc++ presence,
       # sysroot contents) with a printed summary. The step is fatal: shipping
       # an APK with a silently broken toolchain is worse than not shipping.
+
       - name: Provision on-device clang toolchain
         run: |
+          chmod +x ./toolchain/setup-toolchain.sh
           ./toolchain/setup-toolchain.sh
 
       - name: Prepare signing material
