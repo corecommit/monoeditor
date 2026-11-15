@@ -61,54 +61,68 @@ fun CompletionList(
                 key = { i, item -> (i.toLong() * 1_000_003L) + item.label.hashCode().toLong() + item.module.hashCode().toLong() }
             ) { index, item ->
                 val selected = index == state.completionSelected
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(if (selected) theme.surfaceHigh else theme.surface)
                         .clickable { controller.acceptCompletion(item) }
                         .padding(horizontal = 10.dp, vertical = 5.dp)
                 ) {
-                    BasicText(
-                        text = item.kind.badge,
-                        style = TextStyle(
-                            color = theme.textTertiary,
-                            fontSize = 10.sp,
-                            fontFamily = FontFamily.Monospace
-                        ),
-                        modifier = Modifier.width(22.dp)
-                    )
-                    BasicText(
-                        text = item.label,
-                        style = TextStyle(
-                            color = if (selected) theme.accent else theme.textPrimary,
-                            fontSize = 13.sp,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = if (item.kind.boldWorthy) FontWeight.Bold else FontWeight.Normal
-                        ),
-                        modifier = Modifier.weight(1f, fill = false)
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    BasicText(
-                        text = item.detail,
-                        style = TextStyle(
-                            color = theme.textTertiary,
-                            fontSize = 10.sp,
-                            fontFamily = FontFamily.Monospace
-                        ),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    BasicText(
-                        text = item.module,
-                        style = TextStyle(
-                            color = theme.textSecondary,
-                            fontSize = 9.sp,
-                            fontFamily = FontFamily.Monospace
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                        BasicText(
+                            text = item.kind.badge,
+                            style = TextStyle(
+                                color = theme.textTertiary,
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace
+                            ),
+                            modifier = Modifier.width(22.dp)
                         )
-                    )
+                        BasicText(
+                            text = item.label,
+                            style = TextStyle(
+                                color = if (selected) theme.accent else theme.textPrimary,
+                                fontSize = 13.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = if (item.kind.boldWorthy) FontWeight.Bold else FontWeight.Normal
+                            ),
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        BasicText(
+                            text = item.detail,
+                            style = TextStyle(
+                                color = theme.textTertiary,
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace
+                            ),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        BasicText(
+                            text = item.module,
+                            style = TextStyle(
+                                color = theme.textSecondary,
+                                fontSize = 9.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        )
+                    }
+                    if (item.description.isNotEmpty()) {
+                        BasicText(
+                            text = item.description,
+                            style = TextStyle(
+                                color = theme.textTertiary,
+                                fontSize = 9.sp,
+                                fontFamily = FontFamily.Monospace
+                            ),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(start = 22.dp, top = 1.dp)
+                        )
+                    }
                 }
             }
         }

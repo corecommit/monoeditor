@@ -68,10 +68,13 @@ class AppContainer(private val app: Application) {
         _session = s
         sessionOpen.value = true
         settings.lastProject = project.name
+        settings.touchRecent(project.name)
         return s
     }
 
     fun closeSession() {
+        // Closing counts as the last time we worked on it.
+        _session?.project?.name?.let { settings.touchRecent(it) }
         _session?.close()
         _session = null
         sessionOpen.value = false

@@ -46,7 +46,9 @@ data class CompletionItem(
     val detail: String,
     val module: String,
     val insert: String = label,
-    val snippet: Snippet? = null
+    val snippet: Snippet? = null,
+    /** One short line explaining what the item is / does. */
+    val description: String = ""
 )
 
 /**

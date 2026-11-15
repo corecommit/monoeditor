@@ -320,6 +320,8 @@ class ProjectSession(
 
     fun buildAndRun() {
         if (building) return
+        // Build the file that is open in the editor (not always main.cpp).
+        val entryPath = active?.path
         buildJob = scope.launch {
             saveAll()
             building = true
@@ -332,7 +334,7 @@ class ProjectSession(
             runFinished = false
             exitCode = -1
 
-            val staged = withContext(Dispatchers.IO) { stageFiles() }
+            val staged = withContext(Dispatchers.IO) { stageFiles(entryPath) }
             if (staged == null) {
                 building = false
                 buildStatusText = "could not stage files"
@@ -340,6 +342,7 @@ class ProjectSession(
                 return@launch
             }
 
+            buildLog.add("building ${staged.entryName}")
             val req = dev.mono.compiler.build.BuildEngine.Request(
                 projectName = project.name,
                 mainFile = staged.mainFile,
@@ -375,7 +378,7 @@ class ProjectSession(
             lastBuildOk = success
             binaryPath = binary
             if (success && binary != null) {
-                runProgram(File(binary))
+                runProgram(File(binary), staged.entryName)
             }
         }
     }
@@ -400,10 +403,21 @@ class ProjectSession(
         tab.controller.setDiagnostics(mapped)
     }
 
-    private class Staged(val mainFile: File, val modulesDir: File, val projectDir: File)
+    private class Staged(
+        val mainFile: File,
+        val modulesDir: File,
+        val projectDir: File,
+        /** File name that is compiled and run (main.cpp unless another source is open). */
+        val entryName: String
+    )
+
+    private fun isSourceFile(name: String): Boolean {
+        val ext = name.substringAfterLast('.', "").lowercase()
+        return ext == "cpp" || ext == "cc" || ext == "cxx" || ext == "c++"
+    }
 
     /** Copies sources + modules into cache so clang gets plain File paths. */
-    private fun stageFiles(): Staged? {
+    private fun stageFiles(entryPath: String?): Staged? {
         val base = File(cacheSub("stage"), project.name)
         base.deleteRecursively()
         val projectDir = File(base, "project").apply { mkdirs() }
@@ -420,14 +434,21 @@ class ProjectSession(
         for (m in repository.listModules()) {
             repository.read(m.path)?.let { File(modulesDir, m.name).writeText(it) }
         }
-        return Staged(File(projectDir, "main.cpp"), modulesDir, projectDir)
+
+        // Entry point: the open source file when it belongs to this project,
+        // otherwise main.cpp (e.g. a header or a module is in front).
+        val inProject = entryPath != null && entryPath.startsWith("projects/${project.name}/")
+        val entryName = entryPath?.substringAfterLast('/')
+            ?.takeIf { inProject && isSourceFile(it) && File(projectDir, it).isFile }
+            ?: "main.cpp"
+        return Staged(File(projectDir, entryName), modulesDir, projectDir, entryName)
     }
 
     // ----------------------------------------------------------------- run
 
-    private fun runProgram(binary: File) {
+    private fun runProgram(binary: File, entryName: String = "main.cpp") {
         running = true
-        console.add(ConsoleLine("— running ${project.name} (timeout ${settings.runTimeoutSec}s) —", ConsoleLine.META))
+        console.add(ConsoleLine("— running ${project.name}/$entryName (timeout ${settings.runTimeoutSec}s) —", ConsoleLine.META))
         runJob = scope.launch {
             val events = runner.events
             val collector = launch {

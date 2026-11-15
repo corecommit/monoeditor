@@ -60,6 +60,14 @@ fun HomeScreen(
     var renameTarget by remember { mutableStateOf<ProjectInfo?>(null) }
     var deleteTarget by remember { mutableStateOf<ProjectInfo?>(null) }
 
+    // Recently opened projects (that still exist), most recent first.
+    val recents = remember(projects) {
+        container.settings.recentProjects.mapNotNull { r ->
+            projects.firstOrNull { it.name == r.name }?.let { it to r.openedAtMs }
+        }.take(5)
+    }
+    val openedAt = remember(recents) { recents.associate { it.first.name to it.second } }
+
     // Refresh when the underlying storage changes.
     LaunchedEffect(container.projectsRevision.value) {
         projects = container.repository.projects()
@@ -85,7 +93,22 @@ fun HomeScreen(
             item {
                 ToolchainCard(container, theme)
             }
-            item { SectionLabel("PROJECTS", theme) }
+            if (recents.isNotEmpty()) {
+                item(key = "recent-label") { SectionLabel("RECENT", theme) }
+                items(recents, key = { "recent:" + it.first.name }) { (p, ts) ->
+                    RecentRow(
+                        project = p,
+                        openedAtMs = ts,
+                        theme = theme,
+                        onOpen = {
+                            container.openSession(p)
+                            onOpenProject()
+                        }
+                    )
+                    Hairline(theme, Modifier.padding(start = 16.dp))
+                }
+            }
+            item(key = "projects-label") { SectionLabel("PROJECTS", theme) }
             if (projects.isEmpty()) {
                 item {
                     MonoText(
@@ -99,6 +122,7 @@ fun HomeScreen(
             items(projects, key = { it.name }) { p ->
                 ProjectRow(
                     project = p,
+                    lastOpenedMs = openedAt[p.name],
                     theme = theme,
                     onOpen = {
                         container.openSession(p)
@@ -153,6 +177,7 @@ fun HomeScreen(
             onDismiss = { renameTarget = null },
             onConfirm = { name ->
                 container.repository.renameProject(target.name, name).getOrNull()?.let {
+                    container.settings.renameRecent(target.name, it.name)
                     projects = container.repository.projects()
                 }
                 renameTarget = null
@@ -167,6 +192,7 @@ fun HomeScreen(
             onDismiss = { deleteTarget = null },
             onConfirm = {
                 container.repository.deleteProject(target.name)
+                container.settings.removeRecent(target.name)
                 projects = container.repository.projects()
                 deleteTarget = null
             }
@@ -212,6 +238,7 @@ private fun ToolchainCard(container: AppContainer, theme: MonoTheme) {
 @Composable
 private fun ProjectRow(
     project: ProjectInfo,
+    lastOpenedMs: Long?,
     theme: MonoTheme,
     onOpen: () -> Unit,
     onRename: () -> Unit,
@@ -227,8 +254,9 @@ private fun ProjectRow(
         Row(verticalAlignment = Alignment.CenterVertically) {
             MonoText(project.name, theme, fontSize = 15, bold = true)
             Spacer(Modifier.weight(1f))
-            val fmt = remember { SimpleDateFormat("MMM d, HH:mm", Locale.getDefault()) }
-            MonoText(fmt.format(Date()), theme, color = theme.textTertiary, fontSize = 11)
+            if (lastOpenedMs != null) {
+                MonoText(relativeTime(lastOpenedMs), theme, color = theme.textTertiary, fontSize = 11)
+            }
             IconAction(MonoIcons.More, theme.textTertiary, size = 16.dp) { menu = !menu }
         }
         MonoText("projects/${project.name}/main.cpp", theme, color = theme.textTertiary, fontSize = 11)
@@ -239,5 +267,41 @@ private fun ProjectRow(
                 ActionChip("delete", theme, onClick = onDelete)
             }
         }
+    }
+}
+
+/** A recently worked-on project: name, when, and where its main file lives. */
+@Composable
+private fun RecentRow(
+    project: ProjectInfo,
+    openedAtMs: Long,
+    theme: MonoTheme,
+    onOpen: () -> Unit
+) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onOpen)
+            .padding(horizontal = 16.dp, vertical = 10.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            MonoText(project.name, theme, fontSize = 14, bold = true)
+            Spacer(Modifier.weight(1f))
+            MonoText(relativeTime(openedAtMs), theme, color = theme.textTertiary, fontSize = 11)
+        }
+        MonoText("continue where you left off", theme, color = theme.textTertiary, fontSize = 10)
+    }
+}
+
+/** "just now", "5m ago", "3h ago", "yesterday", "4d ago", then a date. */
+private fun relativeTime(thenMs: Long, nowMs: Long = System.currentTimeMillis()): String {
+    val s = ((nowMs - thenMs).coerceAtLeast(0L)) / 1000L
+    return when {
+        s < 60L -> "just now"
+        s < 3_600L -> "${s / 60L}m ago"
+        s < 86_400L -> "${s / 3_600L}h ago"
+        s < 172_800L -> "yesterday"
+        s < 7L * 86_400L -> "${s / 86_400L}d ago"
+        else -> SimpleDateFormat("MMM d", Locale.getDefault()).format(Date(thenMs))
     }
 }

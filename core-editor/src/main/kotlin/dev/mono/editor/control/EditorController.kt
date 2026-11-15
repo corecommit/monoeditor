@@ -168,7 +168,7 @@ class EditorController(
         state.text.insert(line, col, s)
         val end = state.text.spanEnd(line, col, s)
         state.setCaret(end.first, end.second)
-        state.onDocumentStructureChanged(line)
+        if (s.contains('\n')) state.onDocumentStructureChanged(line) else state.onLineEdited(line)
     }
 
     /**
@@ -209,14 +209,14 @@ class EditorController(
             val removed = t.delete(line, col - 1, line, col + 1)
             state.setCaret(line, col - 1)
             record(UndoStack.Command(UndoStack.Type.DELETE, line, col - 1, removed, before, snapshot()))
-            afterEdit(line)
+            afterEdit(line, singleLine = true)
             return
         }
         if (col > 0) {
             val removed = t.delete(line, col - 1, line, col)
             state.setCaret(line, col - 1)
             record(UndoStack.Command(UndoStack.Type.DELETE, line, col - 1, removed, before, snapshot()))
-            afterEdit(line)
+            afterEdit(line, singleLine = true)
         } else {
             val prevLen = t.lineLength(line - 1)
             val removed = t.delete(line - 1, prevLen, line, 0)
@@ -238,7 +238,7 @@ class EditorController(
         if (col < t.lineLength(line)) {
             val removed = t.delete(line, col, line, col + 1)
             record(UndoStack.Command(UndoStack.Type.DELETE, line, col, removed, before, snapshot()))
-            afterEdit(line)
+            afterEdit(line, singleLine = true)
         } else if (line < t.lineCount - 1) {
             val removed = t.delete(line, col, line + 1, 0)
             record(UndoStack.Command(UndoStack.Type.DELETE, line, col, removed, before, snapshot()))
@@ -246,9 +246,87 @@ class EditorController(
         }
     }
 
+    /**
+     * Tab key. A selection spanning several lines indents every one of them;
+     * otherwise it inserts spaces up to the next indent stop (replacing a
+     * single-line selection, like most editors).
+     */
     fun tab() {
+        val b = state.selectionBounds()
+        if (b != null && b.first.line != b.second.line) {
+            var last = b.second.line
+            if (b.second.col == 0) last--
+            if (last >= b.first.line) {
+                shiftLines(b.first.line, last, indent = true)
+                return
+            }
+        }
         if (state.hasSelection) deleteSelection()
-        insertWithUndo(" ".repeat(state.indentWidth), coalesce = false)
+        val width = state.indentWidth.coerceAtLeast(1)
+        val n = width - (state.caretCol % width)
+        insertWithUndo(" ".repeat(n), coalesce = false)
+    }
+
+    /** Shift+Tab: removes one indent level from the caret line / every selected line. */
+    fun untab() {
+        val b = state.selectionBounds()
+        val first = b?.first?.line ?: state.caretLine
+        var last = b?.second?.line ?: state.caretLine
+        if (b != null && b.second.col == 0 && last > first) last--
+        shiftLines(first, last, indent = false)
+    }
+
+    /** Indents or outdents lines [first]..[last] as ONE undoable step. */
+    private fun shiftLines(first: Int, last: Int, indent: Boolean) {
+        val t = state.text
+        val width = state.indentWidth.coerceAtLeast(1)
+        val pad = " ".repeat(width)
+        val before = snapshot()
+        val children = ArrayList<UndoStack.Command>()
+        val deltas = IntArray((last - first + 1).coerceAtLeast(0))
+        for (line in first..last) {
+            if (line !in 0 until t.lineCount) continue
+            if (indent) {
+                if (t.lineLength(line) == 0) continue // leave blank lines alone
+                t.insert(line, 0, pad)
+                children.add(UndoStack.Command(UndoStack.Type.INSERT, line, 0, pad, before, before))
+                deltas[line - first] = width
+            } else {
+                val text = t.line(line)
+                var n = 0
+                if (text.startsWith("\t")) {
+                    n = 1
+                } else {
+                    while (n < width && n < text.length && text[n] == ' ') n++
+                }
+                if (n == 0) continue
+                val removed = t.delete(line, 0, line, n)
+                children.add(UndoStack.Command(UndoStack.Type.DELETE, line, 0, removed, before, before))
+                deltas[line - first] = -n
+            }
+        }
+        if (children.isEmpty()) return
+
+        fun adjusted(line: Int, col: Int): Int {
+            val d = if (line in first..last) deltas[line - first] else 0
+            return (col + d).coerceAtLeast(0)
+        }
+        val hadSelection = state.anchorLine >= 0
+        val aLine = state.anchorLine
+        val aCol = adjusted(aLine, state.anchorCol)
+        val cLine = state.caretLine
+        state.setCaret(cLine, adjusted(cLine, state.caretCol))
+        if (hadSelection) {
+            state.anchorLine = aLine
+            state.anchorCol = aCol
+        }
+        record(
+            UndoStack.Command(
+                UndoStack.Type.COMPOSITE, 0, 0, "", before, snapshot(),
+                children = children
+            )
+        )
+        afterEdit(first)
     }
 
     // ------------------------------------------------------------ caret move
@@ -589,7 +667,7 @@ class EditorController(
         } else {
             record(newInsert(line, col, s, before, after))
         }
-        afterEdit(line)
+        afterEdit(line, singleLine = !s.contains('\n'))
     }
 
     private fun newInsert(line: Int, col: Int, s: String, before: UndoStack.Snapshot, after: UndoStack.Snapshot) =
@@ -615,8 +693,10 @@ class EditorController(
     private fun snapshot(): UndoStack.Snapshot =
         UndoStack.Snapshot(state.caretLine, state.caretCol, state.anchorLine, state.anchorCol)
 
-    private fun afterEdit(fromLine: Int) {
-        state.onDocumentStructureChanged(fromLine)
+    private fun afterEdit(fromLine: Int, singleLine: Boolean = false) {
+        // A single-line edit leaves every other line's index and content
+        // alone, so only that line (plus any lexer-state spill) is redone.
+        if (singleLine) state.onLineEdited(fromLine) else state.onDocumentStructureChanged(fromLine)
         refreshBracketMatch()
         requestScroll()
         updateCompletionPrefix()

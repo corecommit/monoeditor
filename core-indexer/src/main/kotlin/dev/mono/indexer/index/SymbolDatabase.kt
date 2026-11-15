@@ -133,7 +133,7 @@ class SymbolDatabase {
         // Snippets + a small always-available keyword set.
         items.addAll(Snippets.completionItems())
         for (k in QUICK_KEYWORDS) {
-            items.add(CompletionItem(k, SymKind.KEYWORD, "keyword", module = "C++"))
+            items.add(CompletionItem(k, SymKind.KEYWORD, "keyword", module = "C++", description = StlDescriptions.forKeyword(k)))
         }
         return items
     }
@@ -176,7 +176,9 @@ class SymbolDatabase {
                 }
             },
             module = module,
-            insert = name
+            insert = name,
+            // Only the curated standard-library rows have written descriptions.
+            description = if (header.isNotEmpty()) StlDescriptions.forSymbol(this) else ""
         )
     }
 

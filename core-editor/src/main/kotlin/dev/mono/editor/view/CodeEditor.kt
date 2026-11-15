@@ -137,11 +137,14 @@ private fun MonoEditorContent(
     val textMeasurer = rememberTextMeasurer()
     val cache = remember(theme) { LineVisualCache() }
 
+    // Glyph width only depends on the font size — measure it once per size,
+    // not on every keystroke.
+    val charWidth = remember(state.fontSizeSp) {
+        val style = TextStyle(fontFamily = FontFamily.Monospace, fontSize = state.fontSizeSp.sp)
+        textMeasurer.measure("8", style).size.width.toFloat().coerceAtLeast(1f)
+    }
     LaunchedEffect(state.fontSizeSp, state.textRevision) {
         with(density) {
-            val style = TextStyle(fontFamily = FontFamily.Monospace, fontSize = state.fontSizeSp.sp)
-            val probe = textMeasurer.measure("8", style)
-            val charWidth = probe.size.width.toFloat().coerceAtLeast(1f)
             val lineH = (state.fontSizeSp * 1.55f).dp.toPx()
             val digits = state.text.lineCount.toString().length.coerceAtLeast(2)
             val gutter = digits * charWidth + 16.dp.toPx()
@@ -159,14 +162,26 @@ private fun MonoEditorContent(
     val caretY = remember { Animatable(0f) }
     val blinkAlpha = remember { mutableFloatStateOf(1f) }
     val lastCaretMoveNanos = remember { java.util.concurrent.atomic.AtomicLong(System.nanoTime()) }
+    val lastCaretRevision = remember { longArrayOf(Long.MIN_VALUE) }
 
     LaunchedEffect(state.caretLine, state.caretCol, state.textRevision, state.fontSizeSp, state.gutterWidthPx, theme.generation) {
         lastCaretMoveNanos.set(System.nanoTime())
         val layout = cache.layout(state, theme, textMeasurer, state.caretLine)
         val x = state.gutterWidthPx + padH(density) + layout.xAt(state.caretCol)
         val y = state.caretLine * state.lineHeightPx
-        launch { caretX.animateTo(x, tween(130, easing = FastOutSlowInEasing)) }
-        caretY.animateTo(y, tween(130, easing = FastOutSlowInEasing))
+        val rev = state.textRevision
+        val edited = rev != lastCaretRevision[0]
+        lastCaretRevision[0] = rev
+        if (edited) {
+            // Typing: the caret must sit right behind the new character, not
+            // glide there ~130 ms later (that lag is what felt slow, and each
+            // animation frame also repainted the whole text canvas).
+            caretX.snapTo(x)
+            caretY.snapTo(y)
+        } else {
+            launch { caretX.animateTo(x, tween(80, easing = FastOutSlowInEasing)) }
+            caretY.animateTo(y, tween(80, easing = FastOutSlowInEasing))
+        }
     }
 
     // Soft blink: solid shortly after a move, then a gentle sine fade. The
@@ -658,13 +673,18 @@ internal class LineVisualCache {
                 // everything at or after the first changed line (edits can
                 // shift the lines below them).
                 val from = state.consumeStructureDirtyFrom()
+                val to = state.consumeStructureDirtyTo()
                 if (from != Int.MAX_VALUE) {
-                    if (from <= 0) {
+                    if (from <= 0 && to == Int.MAX_VALUE) {
                         map.clear()
                     } else {
+                        // [from, to): exactly the lines the edit (and any
+                        // lexer-state spill) touched. A structural edit sets
+                        // to = MAX, i.e. "everything from here down".
                         val iter = map.entries.iterator()
                         while (iter.hasNext()) {
-                            if (iter.next().key >= from) iter.remove()
+                            val k = iter.next().key
+                            if (k >= from && k < to) iter.remove()
                         }
                     }
                 }

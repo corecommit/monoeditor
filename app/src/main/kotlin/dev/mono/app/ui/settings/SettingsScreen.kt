@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
@@ -24,9 +25,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import dev.mono.app.session.AppContainer
 import dev.mono.app.ui.ActionChip
+import dev.mono.app.ui.DropdownField
+import dev.mono.app.ui.DropdownOption
 import dev.mono.app.ui.Hairline
 import dev.mono.app.ui.IconAction
 import dev.mono.app.ui.MonoText
@@ -103,8 +111,7 @@ fun SettingsScreen(
             // ------------------------------------------------ appearance
             SectionLabel("APPEARANCE", theme)
             SettingRow(theme) {
-                MonoText("theme", theme)
-                Spacer(Modifier.weight(1f))
+                SettingLabel("theme", "light or dark interface", theme, Modifier.weight(1f).padding(end = 8.dp))
                 ActionChip(
                     if (settings.themeMode == ThemeMode.DARK) "dark" else "light",
                     theme
@@ -115,8 +122,7 @@ fun SettingsScreen(
                 }
             }
             SettingRow(theme) {
-                MonoText("editor font", theme)
-                Spacer(Modifier.weight(1f))
+                SettingLabel("editor font", "text size in the code editor", theme, Modifier.weight(1f).padding(end = 8.dp))
                 ActionChip("-", theme) {
                     settings.fontSizeSp = (settings.fontSizeSp - 1f).coerceIn(8f, 32f)
                     container.session?.tabs?.forEach { it.state.fontSizeSp = settings.fontSizeSp }
@@ -132,8 +138,7 @@ fun SettingsScreen(
                 }
             }
             SettingRow(theme) {
-                MonoText("indent width", theme)
-                Spacer(Modifier.weight(1f))
+                SettingLabel("indent width", "spaces added by tab and auto-indent", theme, Modifier.weight(1f).padding(end = 8.dp))
                 for (w in listOf(2, 4, 8)) {
                     ActionChip("$w", theme, enabledStyle = settings.indentWidth != w) {
                         settings.indentWidth = w
@@ -147,19 +152,30 @@ fun SettingsScreen(
             // ------------------------------------------------ compiler
             SectionLabel("COMPILER", theme)
             SettingRow(theme) {
-                MonoText("standard", theme)
-                Spacer(Modifier.weight(1f))
-                for (s in CppStandard.entries) {
-                    ActionChip(s.label, theme, enabledStyle = settings.cppStandard != s.flag) {
-                        settings.cppStandard = s.flag
+                SettingLabel(
+                    "standard",
+                    "C++ language version used to compile",
+                    theme,
+                    Modifier.weight(1f).padding(end = 8.dp)
+                )
+                val standards = CppStandard.entries
+                DropdownField(
+                    selectedIndex = standards.indexOf(CppStandard.fromFlag(settings.cppStandard)),
+                    options = standards.map { DropdownOption(it.label, describeStandard(it)) },
+                    theme = theme,
+                    onSelect = { i ->
+                        settings.cppStandard = standards[i].flag
                         bump()
                     }
-                    Spacer(Modifier.padding(2.dp))
-                }
+                )
             }
             SettingRow(theme) {
-                MonoText("optimization", theme)
-                Spacer(Modifier.weight(1f))
+                SettingLabel(
+                    "optimization",
+                    "0 builds fastest, 2/3 run fastest, s is smallest",
+                    theme,
+                    Modifier.weight(1f).padding(end = 8.dp)
+                )
                 for (o in listOf(OptLevel.O0, OptLevel.O1, OptLevel.O2, OptLevel.O3, OptLevel.OS)) {
                     ActionChip(o.flag.removePrefix("-O"), theme, enabledStyle = settings.optLevel != o.flag) {
                         settings.optLevel = o.flag
@@ -169,7 +185,8 @@ fun SettingsScreen(
                 }
             }
             Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-                MonoText("extra flags", theme, color = theme.textTertiary, fontSize = 11)
+                MonoText("extra flags", theme)
+                MonoText("passed straight to clang, e.g. -Wall -Wextra", theme, color = theme.textTertiary, fontSize = 10)
                 Spacer(Modifier.height(6.dp))
                 var flags by remember(revision) { mutableStateOf(settings.extraFlags) }
                 MinimalTextField(
@@ -182,8 +199,12 @@ fun SettingsScreen(
                 )
             }
             SettingRow(theme) {
-                MonoText("precompiled header", theme)
-                Spacer(Modifier.weight(1f))
+                SettingLabel(
+                    "precompiled header",
+                    "pre-parses common headers so builds are faster",
+                    theme,
+                    Modifier.weight(1f).padding(end = 8.dp)
+                )
                 ActionChip(if (settings.usePch) "on" else "off", theme) {
                     settings.usePch = !settings.usePch
                     bump()
@@ -191,7 +212,8 @@ fun SettingsScreen(
             }
             if (settings.usePch) {
                 Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-                    MonoText("prefix header includes (one per line)", theme, color = theme.textTertiary, fontSize = 11)
+                    MonoText("prefix header includes", theme)
+                    MonoText("one header per line, baked into the precompiled header", theme, color = theme.textTertiary, fontSize = 10)
                     Spacer(Modifier.height(6.dp))
                     var pch by remember(revision) { mutableStateOf(settings.pchIncludes) }
                     MinimalTextField(
@@ -199,13 +221,16 @@ fun SettingsScreen(
                         onValueChange = { pch = it; settings.pchIncludes = it },
                         hint = "<cstdio> …",
                         theme = theme,
-                        modifier = Modifier.fillMaxWidth().height(96.dp)
+                        // The box scrolls itself; never hand leftover scroll to the page.
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(96.dp)
+                            .nestedScroll(ConsumeAllScroll)
                     )
                 }
             }
             SettingRow(theme) {
-                MonoText("run timeout (s)", theme)
-                Spacer(Modifier.weight(1f))
+                SettingLabel("run timeout", "stops a program that runs longer than this", theme, Modifier.weight(1f).padding(end = 8.dp))
                 ActionChip("-", theme) {
                     settings.runTimeoutSec = (settings.runTimeoutSec - 5).coerceIn(1, 600); bump()
                 }
@@ -217,8 +242,7 @@ fun SettingsScreen(
                 }
             }
             SettingRow(theme) {
-                MonoText("autosave (s)", theme)
-                Spacer(Modifier.weight(1f))
+                SettingLabel("autosave", "how often changes are written to disk", theme, Modifier.weight(1f).padding(end = 8.dp))
                 ActionChip("-", theme) {
                     settings.autosaveSec = (settings.autosaveSec - 1).coerceIn(1, 60); bump()
                 }
@@ -233,6 +257,8 @@ fun SettingsScreen(
             // ------------------------------------------------ storage
             SectionLabel("STORAGE", theme)
             Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                MonoText("where projects and modules are kept", theme, color = theme.textTertiary, fontSize = 10)
+                Spacer(Modifier.height(6.dp))
                 MonoText(
                     if (container.repository.usingSharedStorage)
                         "using shared Documents/Mono (SAF tree)"
@@ -279,6 +305,9 @@ fun SettingsScreen(
                 }
                 MonoText(line, theme, color = theme.textSecondary, fontSize = 11)
                 Spacer(Modifier.height(8.dp))
+                MonoText("download URL (optional)", theme)
+                MonoText("a sysroot-only.zip to install if the bundled one is missing", theme, color = theme.textTertiary, fontSize = 10)
+                Spacer(Modifier.height(6.dp))
                 MinimalTextField(
                     value = url,
                     onValueChange = { url = it; settings.toolchainUrl = it },
@@ -329,4 +358,32 @@ private fun SettingRow(theme: MonoTheme, content: @Composable androidx.compose.f
             .padding(horizontal = 16.dp, vertical = 8.dp),
         content = content
     )
+}
+
+/** Setting name with a small description underneath. */
+@Composable
+private fun SettingLabel(title: String, description: String, theme: MonoTheme, modifier: Modifier = Modifier) {
+    Column(modifier) {
+        MonoText(title, theme)
+        if (description.isNotEmpty()) {
+            MonoText(description, theme, color = theme.textTertiary, fontSize = 10)
+        }
+    }
+}
+
+private fun describeStandard(std: CppStandard): String = when (std) {
+    CppStandard.CXX11 -> "auto, lambdas, move semantics, smart pointers"
+    CppStandard.CXX14 -> "generic lambdas, make_unique, auto return types"
+    CppStandard.CXX17 -> "structured bindings, optional, string_view, if constexpr"
+    CppStandard.CXX20 -> "concepts, ranges, coroutines, <=> operator"
+    CppStandard.CXX23 -> "newest: expected, deducing this, print (needs a recent clang)"
+}
+
+/**
+ * Swallows whatever scroll a child text box could not use, so reaching the
+ * end of the box never starts scrolling the settings page behind it.
+ */
+private val ConsumeAllScroll = object : NestedScrollConnection {
+    override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset = available
+    override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity = available
 }

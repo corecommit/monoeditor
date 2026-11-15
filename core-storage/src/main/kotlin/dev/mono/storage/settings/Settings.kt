@@ -6,6 +6,9 @@ import dev.mono.storage.model.ThemeMode
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
+/** A project the user opened, with when they last worked on it. */
+data class RecentProject(val name: String, val openedAtMs: Long)
+
 /**
  * Application settings backed by SharedPreferences.
  *
@@ -93,6 +96,41 @@ class Settings(context: Context) {
         get() = prefs.getString(KEY_LAST_PROJECT, "") ?: ""
         set(value) = edit { putString(KEY_LAST_PROJECT, value) }
 
+    // --- recent projects ---
+
+    /** Most recently opened first, at most [MAX_RECENTS]. */
+    val recentProjects: List<RecentProject>
+        get() = (prefs.getString(KEY_RECENTS, "") ?: "")
+            .lineSequence()
+            .mapNotNull { line ->
+                val tab = line.indexOf('\t')
+                if (tab <= 0) return@mapNotNull null
+                val ts = line.substring(0, tab).toLongOrNull() ?: return@mapNotNull null
+                val name = line.substring(tab + 1)
+                if (name.isBlank()) null else RecentProject(name, ts)
+            }
+            .toList()
+
+    /** Marks [name] as just worked on (moves it to the top). */
+    fun touchRecent(name: String) {
+        val clean = name.replace('\n', ' ').replace('\t', ' ')
+        val rest = recentProjects.filter { it.name != clean }
+        writeRecents(listOf(RecentProject(clean, System.currentTimeMillis())) + rest)
+    }
+
+    fun renameRecent(old: String, new: String) {
+        writeRecents(recentProjects.map { if (it.name == old) it.copy(name = new) else it })
+    }
+
+    fun removeRecent(name: String) {
+        writeRecents(recentProjects.filter { it.name != name })
+    }
+
+    private fun writeRecents(list: List<RecentProject>) {
+        val raw = list.take(MAX_RECENTS).joinToString("\n") { "${it.openedAtMs}\t${it.name}" }
+        edit { putString(KEY_RECENTS, raw) }
+    }
+
     var focusMode: Boolean
         get() = prefs.getBoolean(KEY_FOCUS, false)
         set(value) = edit { putBoolean(KEY_FOCUS, value) }
@@ -113,5 +151,7 @@ class Settings(context: Context) {
         const val KEY_TC_URL = "toolchain_url"
         const val KEY_LAST_PROJECT = "last_project"
         const val KEY_FOCUS = "focus_mode"
+        const val KEY_RECENTS = "recent_projects"
+        const val MAX_RECENTS = 8
     }
 }

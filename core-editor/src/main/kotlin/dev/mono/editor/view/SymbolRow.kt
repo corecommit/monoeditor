@@ -81,10 +81,19 @@ fun SymbolRow(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(40.dp)
-                .horizontalScroll(rememberScrollState())
         ) {
-            for (sym in PRIMARY_SYMBOLS) {
-                SymbolKey(sym, theme) { controller.inputSymbol(sym) }
+            // Always visible: indents the caret line / every selected line.
+            KeyLabel("tab", theme) { controller.tab() }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .weight(1f)
+                    .height(40.dp)
+                    .horizontalScroll(rememberScrollState())
+            ) {
+                for (sym in PRIMARY_SYMBOLS) {
+                    SymbolKey(sym, theme) { controller.inputSymbol(sym) }
+                }
             }
         }
 
@@ -101,7 +110,7 @@ fun SymbolRow(
                         .height(40.dp)
                         .horizontalScroll(rememberScrollState())
                 ) {
-                    KeyLabel("tab", theme) { controller.tab() }
+                    KeyLabel("untab", theme) { controller.untab() }
                     KeyLabel("<", theme) { controller.moveCaretRelative(0, -1) }
                     KeyLabel(">", theme) { controller.moveCaretRelative(0, 1) }
                     KeyLabel("^", theme) { controller.moveCaretRelative(-1, 0) }

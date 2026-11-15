@@ -97,7 +97,8 @@ object Snippets {
             detail = it.title,
             module = "snippet",
             insert = it.body,
-            snippet = it
+            snippet = it,
+            description = "expands into a ready-made code template"
         )
     }
 }

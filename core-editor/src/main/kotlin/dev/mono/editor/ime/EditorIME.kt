@@ -89,7 +89,10 @@ class EditorIMEView(
             KeyEvent.KEYCODE_DEL -> { controller.backspace(); return true }
             KeyEvent.KEYCODE_FORWARD_DEL -> { controller.deleteForward(); return true }
             KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> { controller.enter(); return true }
-            KeyEvent.KEYCODE_TAB -> { controller.tab(); return true }
+            KeyEvent.KEYCODE_TAB -> {
+                if (shift) controller.untab() else controller.tab()
+                return true
+            }
             KeyEvent.KEYCODE_DPAD_LEFT -> { controller.moveCaretRelative(0, -1, shift); return true }
             KeyEvent.KEYCODE_DPAD_RIGHT -> { controller.moveCaretRelative(0, 1, shift); return true }
             KeyEvent.KEYCODE_DPAD_UP -> { controller.moveCaretRelative(-1, 0, shift); return true }
@@ -207,7 +210,7 @@ private class MonoInputConnection(
         val st = controller.state
         st.text.delete(line, col, line, col + draft.length)
         st.setCaret(line, col)
-        st.onDocumentStructureChanged(line)
+        st.onLineEdited(line)
     }
 
     private fun draftStillIntact(line: Int, col: Int, draft: String): Boolean {

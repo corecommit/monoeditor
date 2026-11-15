@@ -107,6 +107,38 @@ class TokenCache {
         return r.first
     }
 
+    /**
+     * Re-lexes [line] right after a single-line edit (no lines added or
+     * removed, so every other line index is unchanged) and follows the lexer
+     * state forward only until it re-syncs. Returns the exclusive end of the
+     * lines whose tokens changed, or [Int.MAX_VALUE] when the cache could
+     * not be patched precisely (caller must treat everything below as stale).
+     */
+    fun relexFrom(text: EditorText, line: Int): Int {
+        if (line < 0 || line >= text.lineCount) return Int.MAX_VALUE
+        ensureSize(text.lineCount)
+        if (line >= dirtyFrom || (line > 0 && states[line] == null)) {
+            invalidateFrom(line)
+            return Int.MAX_VALUE
+        }
+        val carry: LexerState = if (line == 0) LexerState.PLAIN else states[line]!!
+        val r = CppLexer.lexLine(text.line(line), carry)
+        tokens[line] = r.first
+        states[line] = carry
+        var j = line + 1
+        var next = r.second
+        while (j < text.lineCount) {
+            val cached = states[j]
+            if (cached != null && cached == next) break
+            val rr = CppLexer.lexLine(text.line(j), next)
+            tokens[j] = rr.first
+            states[j] = next
+            next = rr.second
+            j++
+        }
+        return j
+    }
+
     /** All token lines (for the symbol parser). */
     fun allTokens(text: EditorText): List<List<Tok>> {
         val out = ArrayList<List<Tok>>(text.lineCount)
@@ -251,8 +283,26 @@ class EditorState(initialText: String = "") {
     fun onDocumentStructureChanged(fromLine: Int) {
         textRevision++
         structureDirtyFrom = minOf(structureDirtyFrom, fromLine.coerceAtLeast(0))
+        structureDirtyTo = Int.MAX_VALUE
         tokenCache.ensureSize(text.lineCount)
         tokenCache.invalidateFrom(fromLine)
+    }
+
+    /**
+     * Fast path for an edit confined to one line: the visual cache only has
+     * to redo that line (and any lines whose highlighting depended on it),
+     * not everything below it.
+     */
+    fun onLineEdited(line: Int) {
+        textRevision++
+        val l = line.coerceAtLeast(0)
+        structureDirtyFrom = minOf(structureDirtyFrom, l)
+        val end = tokenCache.relexFrom(text, l)
+        structureDirtyTo = if (end == Int.MAX_VALUE || structureDirtyTo == Int.MAX_VALUE) {
+            Int.MAX_VALUE
+        } else {
+            maxOf(structureDirtyTo, end)
+        }
     }
 
     /**
@@ -263,6 +313,16 @@ class EditorState(initialText: String = "") {
     fun consumeStructureDirtyFrom(): Int {
         val v = structureDirtyFrom
         structureDirtyFrom = Int.MAX_VALUE
+        return v
+    }
+
+    /** Exclusive end of the lines touched by edits not yet applied to the visual cache. */
+    private var structureDirtyTo = 0
+
+    /** Companion to [consumeStructureDirtyFrom]: the exclusive end, reset on read. */
+    fun consumeStructureDirtyTo(): Int {
+        val v = structureDirtyTo
+        structureDirtyTo = 0
         return v
     }
 
