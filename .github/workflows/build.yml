@@ -4,7 +4,13 @@ on:
   push:
     branches: [ main ]
     tags: [ 'v*' ]
+    paths-ignore:
+      - '**.md'
+      - '.github/workflows/**'
   pull_request:
+    paths-ignore:
+      - '**.md'
+      - '.github/workflows/**'
   workflow_dispatch:
 
 permissions:
@@ -30,15 +36,6 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      # NOTE: we deliberately do NOT use android-actions/setup-android here.
-      # That action still runs `sdkmanager tools` internally, and Google has
-      # removed the legacy "tools" package from the SDK repository, so the
-      # step fails with "Failed to find package 'tools'" (exit code 1). The
-      # hosted ubuntu runner already ships a preinstalled SDK (ANDROID_HOME
-      # is /usr/local/lib/android/sdk, with cmdline-tools), which we use
-      # directly. The NDK is not needed: this build compiles no native code
-      # with Gradle, and the on-device toolchain is downloaded from the
-      # Termux repositories by toolchain/setup-toolchain.sh.
       - name: Install SDK packages
         run: |
           set -euo pipefail
@@ -72,12 +69,6 @@ jobs:
       - name: Install toolchain script dependencies
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends zstd binutils xz-utils zip patchelf
 
-      # Downloads an aarch64-hosted clang/lld (Termux packages), the bionic
-      # sysroot, and assembles the app jniLibs + assets. Every jniLibs file
-      # is renamed/patched to the extractable lib*.so form and verified
-      # (naming, ELF64/AArch64, NEEDED dependency closure, libc++ presence,
-      # sysroot contents) with a printed summary. The step is fatal: shipping
-      # an APK with a silently broken toolchain is worse than not shipping.
       - name: Provision on-device clang toolchain
         run: |
           chmod +x ./toolchain/setup-toolchain.sh
