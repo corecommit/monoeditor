@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -92,6 +93,22 @@ fun MonoEditor(
     modifier: Modifier = Modifier,
     completionProvider: (suspend (prefix: String, memberAccess: Boolean) -> List<CompletionItem>)? = null
 ) {
+    // One fresh editor per tab. The IME view, the listeners and the caches
+    // below are created once and bound to a single state/controller, so
+    // without this key switching tabs kept typing into the previous tab.
+    key(state, controller) {
+        MonoEditorContent(state, controller, theme, modifier, completionProvider)
+    }
+}
+
+@Composable
+private fun MonoEditorContent(
+    state: EditorState,
+    controller: EditorController,
+    theme: MonoTheme,
+    modifier: Modifier,
+    completionProvider: (suspend (prefix: String, memberAccess: Boolean) -> List<CompletionItem>)?
+) {
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
 
@@ -104,6 +121,17 @@ fun MonoEditor(
     }
     val imeBottom = WindowInsets.ime.getBottom(density)
     state.imeVisible = imeBottom > 0
+
+    // Switching tabs rebuilds the editor: if the keyboard was up, hand it to
+    // the new tab's input view so typing continues without a re-tap.
+    val startedWithIme = remember { imeBottom > 0 }
+    LaunchedEffect(imeView) {
+        val v = imeView
+        if (startedWithIme && v != null) {
+            state.hasFocus = true
+            v.post { v.showKeyboard() }
+        }
+    }
 
     // ---- measuring -------------------------------------------------------------
     val textMeasurer = rememberTextMeasurer()
@@ -373,14 +401,22 @@ fun MonoEditor(
             val entry = cache.layout(state, theme, textMeasurer, state.caretLine)
             with(density) {
                 val anchorX = state.gutterWidthPx + padH(density) + entry.xAt(state.caretCol) - state.scrollX
-                val belowY = (state.caretLine + 1) * state.lineHeightPx - state.scrollY + 4.dp.toPx()
-                val popupHeight = 230.dp.toPx()
+                val gap = 4.dp.toPx()
+                val lineTop = state.caretLine * state.lineHeightPx - state.scrollY
+                val lineBottom = lineTop + state.lineHeightPx
+                val spaceBelow = state.viewportHeightPx - lineBottom - gap
+                val spaceAbove = lineTop - gap
+                val maxHeight = 228.dp.toPx()
+                val minHeight = 56.dp.toPx()
+                // With the keyboard open the viewport is short: use the roomier
+                // side of the caret and shrink the list to fit, never more than
+                // ~45% of the editor, instead of a fixed height that covered it.
+                val below = spaceBelow >= maxHeight || spaceBelow >= spaceAbove
+                val available = if (below) spaceBelow else spaceAbove
+                val popupHeight = minOf(maxHeight, available, state.viewportHeightPx * 0.45f)
+                    .coerceAtLeast(minHeight)
                 val popupWidth = 320.dp.toPx()
-                val y = if (belowY + popupHeight <= state.viewportHeightPx) {
-                    belowY
-                } else {
-                    state.caretLine * state.lineHeightPx - state.scrollY - 4.dp.toPx() - popupHeight
-                }
+                val y = if (below) lineBottom + gap else lineTop - gap - popupHeight
                 Popup(
                     offset = IntOffset(
                         anchorX.roundToInt().coerceIn(4, (state.viewportWidthPx - popupWidth).toInt().coerceAtLeast(4)),
@@ -389,7 +425,7 @@ fun MonoEditor(
                     onDismissRequest = { controller.dismissCompletion() },
                     properties = PopupProperties(focusable = false)
                 ) {
-                    CompletionList(state, controller, theme)
+                    CompletionList(state, controller, theme, popupHeight.toDp())
                 }
             }
         }

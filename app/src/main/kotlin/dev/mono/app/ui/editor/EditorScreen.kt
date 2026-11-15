@@ -1,6 +1,7 @@
 package dev.mono.app.ui.editor
 
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -30,6 +31,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -75,7 +77,9 @@ fun EditorScreen(
     onOpenSettings: () -> Unit
 ) {
     var findVisible by remember { mutableStateOf(false) }
-    var focusMode by remember { mutableStateOf(container.settings.focusMode) }
+    // Focus mode is a temporary view, never restored on launch: starting in it
+    // hid every control (including the way out).
+    var focusMode by remember { mutableStateOf(false) }
     var drawerOpen by remember { mutableStateOf(false) }
     var menuOpen by remember { mutableStateOf(false) }
     var fileSheetOpen by remember { mutableStateOf(false) }
@@ -95,8 +99,20 @@ fun EditorScreen(
                 controller.show(WindowInsetsCompat.Type.systemBars())
             }
         }
-        container.settings.focusMode = focusMode
     }
+
+    // Always give the system bars back when leaving the editor.
+    DisposableEffect(Unit) {
+        onDispose {
+            val window = (view.context as? android.app.Activity)?.window
+            if (window != null) {
+                WindowCompat.getInsetsController(window, view).show(WindowInsetsCompat.Type.systemBars())
+            }
+        }
+    }
+
+    // System back leaves focus mode first.
+    BackHandler(enabled = focusMode) { focusMode = false }
 
     val openFromSystem = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
@@ -238,20 +254,22 @@ fun EditorScreen(
                     }
                 }
 
-                // Exit-focus affordance.
+                // Exit-focus affordance: clearly visible, with a generous tap target.
                 if (focusMode) {
                     Box(
                         contentAlignment = Alignment.Center,
                         modifier = Modifier
                             .align(Alignment.TopEnd)
-                            .padding(10.dp)
-                            .size(30.dp)
+                            .padding(12.dp)
+                            .size(40.dp)
+                            .background(theme.surfaceHigh.copy(alpha = 0.92f))
+                            .border(1.dp, theme.border)
                             .clickable { focusMode = false }
                     ) {
                         dev.mono.app.ui.MonoIcon(
                             MonoIcons.Focus,
-                            theme.textTertiary.copy(alpha = 0.4f),
-                            size = 16.dp
+                            theme.textPrimary,
+                            size = 18.dp
                         )
                     }
                 }

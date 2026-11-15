@@ -61,9 +61,12 @@ class EditorIMEView(
         val shift = event.isShiftPressed
         if (handleKey(keyCode, event, ctrl, shift)) return true
         // Printable characters.
+        // (unicodeChar is a character code, not a key code: comparing it with
+        // KEYCODE_FORWARD_DEL — also 112 — silently swallowed the letter "p".
+        // 127 is the DEL control character.)
         val uc = event.unicodeChar
-        if (!ctrl && !event.isAltPressed && uc >= 32 && uc != KeyEvent.KEYCODE_FORWARD_DEL) {
-            controller.inputText(uc.toChar().toString())
+        if (!ctrl && !event.isAltPressed && uc in 32..0x10FFFF && uc != 127) {
+            controller.inputText(String(Character.toChars(uc)))
             return true
         }
         return super.onKeyDown(keyCode, event)

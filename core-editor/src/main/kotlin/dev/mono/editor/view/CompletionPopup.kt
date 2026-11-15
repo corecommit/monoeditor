@@ -22,6 +22,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.mono.editor.control.EditorController
@@ -37,7 +38,8 @@ import dev.mono.indexer.symbols.SymKind
 fun CompletionList(
     state: EditorState,
     controller: EditorController,
-    theme: MonoTheme
+    theme: MonoTheme,
+    height: Dp = 228.dp
 ) {
     val listState = rememberLazyListState()
     LaunchedEffect(state.completionSelected) {
@@ -49,7 +51,7 @@ fun CompletionList(
     Column(
         modifier = Modifier
             .width(320.dp)
-            .height(228.dp)
+            .height(height)
             .background(theme.surface)
             .border(1.dp, theme.border)
     ) {
