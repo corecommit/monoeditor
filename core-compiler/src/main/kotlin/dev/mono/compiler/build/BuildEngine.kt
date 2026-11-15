@@ -169,6 +169,19 @@ class BuildEngine(
         // ---- link -------------------------------------------------------------
         currentCoroutineContext().ensureActive()
         emit(BuildEvent.Phase(0.85f, "linking"))
+        val (rtBuiltins, rtUnwind) = runtimeLibs(sysroot)
+        if (rtBuiltins == null || rtUnwind == null) {
+            emit(
+                BuildEvent.Log(
+                    "link: sysroot lacks " +
+                            listOfNotNull(
+                                "compiler-rt builtins".takeIf { rtBuiltins == null },
+                                "libunwind.a".takeIf { rtUnwind == null }
+                            ).joinToString(" and ") +
+                            " — linking without; reinstall a newer toolchain to fix"
+                )
+            )
+        }
         var linkR = runClang(buildLinkArgs(req, sysroot, objects, outFile, toolchain.lldFile), sysroot)
         if ((!linkR.success || !outFile.isFile) && linkR.output.contains("generic driver")) {
             // The bundled lld is a copy named libld_lld.so, so lld cannot tell
@@ -324,8 +337,36 @@ class BuildEngine(
         args += "-lc++_shared"
 
         args += objects.map { it.absolutePath }
+
+        // The driver links compiler-rt builtins and the static unwinder by
+        // path / -l:libunwind.a. When the sysroot does not ship them that
+        // fails ("cannot open libclang_rt.builtins.a", "unable to find
+        // library -l:libunwind.a"), so skip the default libs, link the
+        // system ones explicitly and add whichever runtime piece exists.
+        val (builtins, unwind) = runtimeLibs(sysroot)
+        if (builtins == null || unwind == null) {
+            args += "-nodefaultlibs"
+            args += listOf("-lc", "-lm", "-ldl")
+            if (builtins != null) args += builtins.absolutePath
+            if (unwind != null) args += unwind.absolutePath
+        }
+
         args += listOf("-o", outFile.absolutePath)
         return args
+    }
+
+    /** compiler-rt builtins and static unwinder shipped in the sysroot, if any. */
+    private fun runtimeLibs(sysroot: File): Pair<File?, File?> {
+        val libRoot = File(sysroot, "usr/lib/aarch64-linux-android")
+        val builtins = listOf(
+            File(sysroot, "resource/lib/aarch64-unknown-linux-android$TARGET_API/libclang_rt.builtins.a"),
+            File(sysroot, "resource/lib/linux/libclang_rt.builtins-aarch64-android.a")
+        ).firstOrNull { it.isFile }
+        val unwind = listOf(
+            File(libRoot, "$TARGET_API/libunwind.a"),
+            File(libRoot, "libunwind.a")
+        ).firstOrNull { it.isFile }
+        return builtins to unwind
     }
 
     /**

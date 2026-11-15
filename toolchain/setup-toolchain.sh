@@ -57,7 +57,7 @@ TARGET_API="26"
 
 # Bootstrap packages; runtime dependencies are resolved recursively from the
 # Packages index, so this list only needs the top-level tools.
-SEED_PACKAGES=(clang lld ndk-sysroot ndk-multilib libc++)
+SEED_PACKAGES=(clang lld ndk-sysroot ndk-multilib libc++ libcompiler-rt)
 
 log() { printf '\033[1;37m[toolchain]\033[0m %s\n' "$*"; }
 
@@ -469,6 +469,50 @@ verify_jnilibs() {
   log "------------------------------------------------"
 }
 
+# compiler-rt builtins + the static unwinder. The clang driver links both on
+# every link (libclang_rt.builtins.a by path inside -resource-dir, and
+# -l:libunwind.a), so a sysroot without them fails on-device with
+# "cannot open .../libclang_rt.builtins.a" / "unable to find library
+# -l:libunwind.a". Sources, in order: the Termux packages (libcompiler-rt),
+# then the Android NDK that GitHub-hosted runners ship.
+install_runtime_libs() {
+  local rtdir="${SYSROOT}/resource/lib/aarch64-unknown-linux-android${TARGET_API}"
+  local legacy="${SYSROOT}/resource/lib/linux"
+  local libdir="${SYSROOT}/usr/lib/aarch64-linux-android"
+  mkdir -p "$rtdir" "$legacy" "$libdir/${TARGET_API}"
+
+  local ndk="${ANDROID_NDK_ROOT:-${ANDROID_NDK_HOME:-${ANDROID_NDK_LATEST_HOME:-}}}"
+  local ndkllvm=""
+  if [ -n "$ndk" ] && [ -d "$ndk/toolchains/llvm/prebuilt" ]; then
+    ndkllvm="$ndk/toolchains/llvm/prebuilt"
+  fi
+
+  local b="" u=""
+  b="$(find "${ROOT_USR}/lib" -path '*clang*' \( -name 'libclang_rt.builtins-aarch64-android.a' -o -name 'libclang_rt.builtins.a' \) -print -quit 2>/dev/null || true)"
+  if [ -z "$b" ] && [ -n "$ndkllvm" ]; then
+    b="$(find "$ndkllvm" -name 'libclang_rt.builtins-aarch64-android.a' -print -quit 2>/dev/null || true)"
+  fi
+  u="$(find "${ROOT_USR}/lib" -path '*clang*' -name 'libunwind.a' -print -quit 2>/dev/null || true)"
+  if [ -z "$u" ] && [ -n "$ndkllvm" ]; then
+    u="$(find "$ndkllvm" -path '*/aarch64/libunwind.a' -print -quit 2>/dev/null || true)"
+  fi
+
+  if [ -n "$b" ] && [ -f "$b" ]; then
+    cp -f "$b" "${rtdir}/libclang_rt.builtins.a"
+    cp -f "$b" "${legacy}/libclang_rt.builtins-aarch64-android.a"
+    log "compiler-rt builtins: ${b}"
+  else
+    log "warning: libclang_rt.builtins (aarch64) not found — on-device links fall back to no builtins"
+  fi
+  if [ -n "$u" ] && [ -f "$u" ]; then
+    cp -f "$u" "${libdir}/libunwind.a"
+    cp -f "$u" "${libdir}/${TARGET_API}/libunwind.a"
+    log "libunwind.a: ${u}"
+  else
+    log "warning: libunwind.a (aarch64) not found — on-device links fall back to no static unwinder"
+  fi
+}
+
 assemble_sysroot() {
   rm -rf "${SYSROOT}"
   mkdir -p "${SYSROOT}/usr/include" \
@@ -532,6 +576,7 @@ assemble_sysroot() {
   fi
   cp -f "$cxx" "${SYSROOT}/usr/lib/aarch64-linux-android/${TARGET_API}/"
   cp -f "$cxx" "${SYSROOT}/usr/lib/aarch64-linux-android/"
+  install_runtime_libs
   log "sysroot assembled at ${SYSROOT}"
 }
 
