@@ -21,7 +21,11 @@ class Settings(context: Context) {
     val revision: StateFlow<Int> = _revision
 
     private fun edit(block: SharedPreferences.Editor.() -> Unit) {
-        prefs.edit().apply(block)
+        val editor = prefs.edit()
+        editor.block()
+        // Must actually commit. (`prefs.edit().apply(block)` is Kotlin's scope
+        // function, not Editor.apply(), so nothing was ever saved.)
+        editor.apply()
         _revision.value = _revision.value + 1
     }
 
@@ -56,7 +60,7 @@ class Settings(context: Context) {
         set(value) = edit { putBoolean(KEY_PCH, value) }
 
     var pchIncludes: String
-        get() = prefs.getString(KEY_PCH_INC, "<cstdio>\n<cstdlib>\n<cstring>\n<vector>\n<string>") ?: ""
+        get() = prefs.getString(KEY_PCH_INC, "<iostream>\n<cstdio>\n<cstdlib>\n<cstring>\n<vector>\n<string>") ?: ""
         set(value) = edit { putString(KEY_PCH_INC, value) }
 
     var runTimeoutSec: Int

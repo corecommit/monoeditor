@@ -179,6 +179,10 @@ class ProjectRepository(
             r.mkdirs("projects/Hello")
             r.writeFile("projects/Hello/main.cpp", newProjectTemplate("Hello"))
             notify("projects/Hello/main.cpp")
+        } else if (r.readFile("projects/Hello/main.cpp") == legacyProjectTemplate("Hello")) {
+            // Untouched sample from an older version: upgrade it to iostream.
+            r.writeFile("projects/Hello/main.cpp", newProjectTemplate("Hello"))
+            notify("projects/Hello/main.cpp")
         }
         if (r.listDir("modules").isEmpty() && !r.exists("modules/greet.h")) {
             r.writeFile("modules/greet.h", SAMPLE_MODULE)
@@ -344,6 +348,23 @@ class ProjectRepository(
 
     companion object {
         fun newProjectTemplate(project: String): String = """
+            // $project — build it with the play button in the top bar.
+            //
+            // Reusable code can live in modules (Modules drawer) and be used
+            // from any project with a plain include:
+            //   #include <greet.h>        // your module, resolved via -I modules
+            //   #include "greet.h"       // quoted form works too
+            //
+            #include <iostream>
+
+            int main() {
+                std::cout << "Hello, World!" << std::endl;
+                return 0;
+            }
+        """.trimIndent()
+
+        /** The previous default (cstdio/printf), so an untouched Hello can be upgraded. */
+        private fun legacyProjectTemplate(project: String): String = """
             // $project — build it with the play button in the top bar.
             //
             // Reusable code can live in modules (Modules drawer) and be used
