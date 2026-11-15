@@ -213,9 +213,20 @@ class EditorController(
             return
         }
         if (col > 0) {
-            val removed = t.delete(line, col - 1, line, col)
-            state.setCaret(line, col - 1)
-            record(UndoStack.Command(UndoStack.Type.DELETE, line, col - 1, removed, before, snapshot()))
+            // Caret sits inside leading indentation (only spaces before it):
+            // delete back to the previous indent stop in ONE step.
+            var n = 1
+            val width = state.indentWidth.coerceAtLeast(1)
+            if (col > 1) {
+                val lead = t.line(line)
+                var onlySpaces = col <= lead.length
+                var i = 0
+                while (onlySpaces && i < col) { if (lead[i] != ' ') onlySpaces = false; i++ }
+                if (onlySpaces) n = ((col - 1) % width) + 1
+            }
+            val removed = t.delete(line, col - n, line, col)
+            state.setCaret(line, col - n)
+            record(UndoStack.Command(UndoStack.Type.DELETE, line, col - n, removed, before, snapshot()))
             afterEdit(line, singleLine = true)
         } else {
             val prevLen = t.lineLength(line - 1)
@@ -354,7 +365,16 @@ class EditorController(
         }
         val newLine = (state.caretLine + dLine).coerceIn(0, state.text.lineCount - 1)
         if (dLine == 0) {
-            moveCaret(newLine, state.caretCol + dCol, extend)
+            val len = state.text.lineLength(state.caretLine)
+            val c = state.caretCol + dCol
+            when {
+                // Left at column 0 / right at end of line wrap to the neighbouring line.
+                c < 0 && state.caretLine > 0 ->
+                    moveCaret(state.caretLine - 1, state.text.lineLength(state.caretLine - 1), extend)
+                c > len && state.caretLine < state.text.lineCount - 1 ->
+                    moveCaret(state.caretLine + 1, 0, extend)
+                else -> moveCaret(newLine, c.coerceIn(0, len), extend)
+            }
         } else {
             val target = state.desiredCol
             moveCaret(newLine, target.coerceAtMost(state.text.lineLength(newLine)), extend)

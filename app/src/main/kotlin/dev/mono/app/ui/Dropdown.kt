@@ -125,6 +125,45 @@ fun DropdownField(
     }
 }
 
+/** One entry in an [ActionMenu]. */
+data class MenuItem(val label: String, val onClick: () -> Unit)
+
+/**
+ * Small popup menu that opens directly under the composable it is called
+ * from (call it inside the Box that wraps the 3-dots button).
+ */
+@Composable
+fun ActionMenu(
+    theme: MonoTheme,
+    items: List<MenuItem>,
+    onDismiss: () -> Unit
+) {
+    Popup(
+        popupPositionProvider = remember { DropdownPositioner() },
+        onDismissRequest = onDismiss,
+        properties = PopupProperties(focusable = true)
+    ) {
+        Column(
+            Modifier
+                .width(150.dp)
+                .background(theme.surfaceHigh)
+                .border(1.dp, theme.border)
+        ) {
+            items.forEachIndexed { i, item ->
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable(onClick = item.onClick)
+                        .padding(horizontal = 14.dp, vertical = 12.dp)
+                ) {
+                    MonoText(item.label, theme, fontSize = 13)
+                }
+                if (i < items.lastIndex) Hairline(theme)
+            }
+        }
+    }
+}
+
 /** Right-aligned under the anchor; flips above it when there is no room below. */
 private class DropdownPositioner : PopupPositionProvider {
     override fun calculatePosition(

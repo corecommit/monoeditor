@@ -9,6 +9,15 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.layout.size
+import kotlinx.coroutines.withTimeoutOrNull
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -95,6 +104,11 @@ fun SymbolRow(
                     SymbolKey(sym, theme) { controller.inputSymbol(sym) }
                 }
             }
+            // Always-visible arrow cluster (hold to repeat).
+            ArrowKey(ArrowDir.LEFT, theme) { controller.moveCaretRelative(0, -1) }
+            ArrowKey(ArrowDir.UP, theme) { controller.moveCaretRelative(-1, 0) }
+            ArrowKey(ArrowDir.DOWN, theme) { controller.moveCaretRelative(1, 0) }
+            ArrowKey(ArrowDir.RIGHT, theme) { controller.moveCaretRelative(0, 1) }
         }
 
         AnimatedVisibility(
@@ -111,10 +125,6 @@ fun SymbolRow(
                         .horizontalScroll(rememberScrollState())
                 ) {
                     KeyLabel("untab", theme) { controller.untab() }
-                    KeyLabel("<", theme) { controller.moveCaretRelative(0, -1) }
-                    KeyLabel(">", theme) { controller.moveCaretRelative(0, 1) }
-                    KeyLabel("^", theme) { controller.moveCaretRelative(-1, 0) }
-                    KeyLabel("v", theme) { controller.moveCaretRelative(1, 0) }
                     for (sym in EXTRA_SYMBOLS_1) SymbolKey(sym, theme) { controller.inputSymbol(sym) }
                 }
                 Row(
@@ -176,6 +186,53 @@ private fun KeyLabel(label: String, theme: MonoTheme, onClick: () -> Unit) {
                 fontFamily = FontFamily.Monospace
             )
         )
+    }
+}
+
+private enum class ArrowDir { LEFT, UP, DOWN, RIGHT }
+
+/** Drawn chevron key; fires once on press, then repeats while held. */
+@Composable
+private fun ArrowKey(dir: ArrowDir, theme: MonoTheme, onStep: () -> Unit) {
+    val color: Color = theme.textPrimary
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .width(36.dp)
+            .height(40.dp)
+            .pointerInput(dir) {
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    down.consume()
+                    onStep()
+                    var released = false
+                    withTimeoutOrNull(350L) {
+                        waitForUpOrCancellation()
+                        released = true
+                    }
+                    while (!released) {
+                        onStep()
+                        withTimeoutOrNull(45L) {
+                            waitForUpOrCancellation()
+                            released = true
+                        }
+                    }
+                }
+            }
+    ) {
+        Canvas(Modifier.size(14.dp)) {
+            val w = size.width
+            val h = size.height
+            val path = Path().apply {
+                when (dir) {
+                    ArrowDir.LEFT -> { moveTo(w * 0.65f, h * 0.1f); lineTo(w * 0.3f, h * 0.5f); lineTo(w * 0.65f, h * 0.9f) }
+                    ArrowDir.RIGHT -> { moveTo(w * 0.35f, h * 0.1f); lineTo(w * 0.7f, h * 0.5f); lineTo(w * 0.35f, h * 0.9f) }
+                    ArrowDir.UP -> { moveTo(w * 0.1f, h * 0.65f); lineTo(w * 0.5f, h * 0.3f); lineTo(w * 0.9f, h * 0.65f) }
+                    ArrowDir.DOWN -> { moveTo(w * 0.1f, h * 0.35f); lineTo(w * 0.5f, h * 0.7f); lineTo(w * 0.9f, h * 0.35f) }
+                }
+            }
+            drawPath(path, color, style = Stroke(width = 1.8.dp.toPx(), cap = StrokeCap.Round))
+        }
     }
 }
 

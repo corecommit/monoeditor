@@ -602,11 +602,13 @@ private fun Modifier.pointerInputGestures(
             state.showSelectionMenu = state.hasSelection
         }
         if (!moved && !longPressed && handleDrag == 0) {
-            val diag = diagnosticAt(downPos)
-            if (diag != null) {
-                state.diagnosticChip = diag
-            } else if (lastChangeTime - downTime < 420) {
-                state.diagnosticChip = null
+            if (lastChangeTime - downTime < 420) {
+                // A tap ALWAYS places the caret, even on an underlined
+                // error. The error message chip is shown in addition (and
+                // toggled off by tapping the same error again) so it can
+                // never block cursor placement.
+                val diag = diagnosticAt(downPos)
+                state.diagnosticChip = if (diag != null && diag != state.diagnosticChip) diag else null
                 val target = charPosAt(downPos)
                 // Tapping the caret again toggles the Paste / Select all menu.
                 val onCaret = !state.hasSelection &&

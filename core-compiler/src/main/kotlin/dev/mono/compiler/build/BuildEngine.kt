@@ -102,29 +102,38 @@ class BuildEngine(
         val depsKey = includeDirsFingerprint(req.includeDirs)
 
         // ---- PCH --------------------------------------------------------------
+        // The header is stored NEXT TO the .pch inside the content-addressed
+        // cache directory and is written exactly once. clang records the
+        // header's mtime inside the .pch and refuses to use it if the file
+        // is touched afterwards ("has been modified since the precompiled
+        // header was built"). Rewriting a per-project header on every build
+        // is what used to trigger that fatal error.
         var pchFile: File? = null
         if (req.usePch && req.pchIncludeLines.isNotEmpty()) {
-            val pchHeader = File(buildDir, "mono_pch.h")
-            pchHeader.writeText(
-                req.pchIncludeLines.joinToString("\n") { "#include $it" } + "\n"
-            )
+            val headerText = req.pchIncludeLines.joinToString("\n") { "#include $it" } + "\n"
             val pchKey = hashOf(
-                pchHeader.readText() + req.std.flag + req.opt.flag +
-                        req.extraFlags.joinToString(" ") + sysroot.absolutePath + "pch-v2"
+                headerText + req.std.flag + req.opt.flag +
+                        req.extraFlags.joinToString(" ") + sysroot.absolutePath + "pch-v3"
             )
             val candidate = File(File(context.cacheDir, "pch"), pchKey).apply { mkdirs() }
+            val pchHeader = File(candidate, "mono_pch.h")
             val pch = File(candidate, "mono_pch.h.pch")
-            if (pch.isFile) {
+            if (pch.isFile && pchHeader.isFile) {
                 pchFile = pch
                 emit(BuildEvent.Log("pch: cached"))
             } else {
                 emit(BuildEvent.Phase(0.08f, "building precompiled header"))
+                pch.delete()
+                pchHeader.delete()
+                pchHeader.writeText(headerText)
                 val r = runClang(buildPchArgs(req, sysroot, pchHeader, pch), sysroot)
                 if (r.success && pch.isFile) {
                     pchFile = pch
                     emit(BuildEvent.Log("pch: built"))
                 } else {
-                    val firstLine = r.output.lineSequence().firstOrNull { it.isNotBlank() } ?: "failed"
+                    candidate.deleteRecursively()
+                    val firstLine = r.output.lineSequence()
+                        .firstOrNull { it.contains("error", true) } ?: "failed"
                     emit(BuildEvent.Log("pch: unavailable ($firstLine); continuing without"))
                 }
             }
@@ -132,23 +141,37 @@ class BuildEngine(
 
         // ---- compile ----------------------------------------------------------
         val objects = ArrayList<File>(tus.size)
-        val flagsKey = req.std.flag + req.opt.flag + req.extraFlags.joinToString(" ") +
-                (pchFile?.let { it.parentFile.name } ?: "nopch")
         for (idx in tus.indices) {
             currentCoroutineContext().ensureActive()
             val tu = tus[idx]
             val content = tu.readText()
-            val key = hashOf(
-                tu.absolutePath + "\u0000" + content + "\u0000" + flagsKey +
-                        "\u0000" + depsKey
-            )
-            val obj = File(objDir, "$key.o")
+
+            fun objFor(pch: File?): File {
+                val flagsKey = req.std.flag + req.opt.flag + req.extraFlags.joinToString(" ") +
+                        (pch?.parentFile?.name ?: "nopch")
+                val key = hashOf(
+                    tu.absolutePath + "\u0000" + content + "\u0000" + flagsKey +
+                            "\u0000" + depsKey
+                )
+                return File(objDir, "$key.o")
+            }
+
+            var obj = objFor(pchFile)
             if (obj.isFile) {
                 emit(BuildEvent.Log("${tu.name}: cached"))
             } else {
                 val frac = 0.15f + 0.6f * (idx.toFloat() / tus.size)
                 emit(BuildEvent.Phase(frac, "compiling ${tu.name}"))
-                val r = runClang(buildCompileArgs(req, sysroot, pchFile, tu, obj), sysroot)
+                var r = runClang(buildCompileArgs(req, sysroot, pchFile, tu, obj), sysroot)
+                // Self-heal: a stale / rejected PCH must never fail the build.
+                // Drop it and compile again without.
+                if (!r.success && pchFile != null && looksLikePchProblem(r.output)) {
+                    pchFile.parentFile?.deleteRecursively()
+                    pchFile = null
+                    obj = objFor(null)
+                    emit(BuildEvent.Log("pch: stale, rebuilding without it"))
+                    r = runClang(buildCompileArgs(req, sysroot, null, tu, obj), sysroot)
+                }
                 for (d in r.diagnostics) emit(BuildEvent.DiagnosticEvent(d))
                 if (!r.success || !obj.isFile) {
                     val first = r.diagnostics.firstOrNull()
@@ -182,15 +205,15 @@ class BuildEngine(
                 )
             )
         }
-        var linkR = runClang(buildLinkArgs(req, sysroot, objects, outFile, toolchain.lldFile), sysroot)
-        if ((!linkR.success || !outFile.isFile) && linkR.output.contains("generic driver")) {
-            // The bundled lld is a copy named libld_lld.so, so lld cannot tell
-            // which flavor to run as. Re-run it under the name "ld.lld".
-            val alias = toolchain.lldAlias()
-            if (alias != null) {
-                emit(BuildEvent.Log("link: retrying with ld.lld alias"))
-                linkR = runClang(buildLinkArgs(req, sysroot, objects, outFile, alias), sysroot)
-            }
+        // lld picks its flavor from the name it is started under, and the
+        // bundled copy is called libld_lld.so. Use the "ld.lld" alias from the
+        // start so there is no failed first attempt and no retry message.
+        val lldPrimary = toolchain.lldAlias() ?: toolchain.lldFile
+        var linkR = runClang(buildLinkArgs(req, sysroot, objects, outFile, lldPrimary), sysroot)
+        if ((!linkR.success || !outFile.isFile) && linkR.output.contains("generic driver") &&
+            lldPrimary != toolchain.lldFile
+        ) {
+            linkR = runClang(buildLinkArgs(req, sysroot, objects, outFile, toolchain.lldFile), sysroot)
         }
         for (d in linkR.diagnostics) emit(BuildEvent.DiagnosticEvent(d))
         if (!linkR.success || !outFile.isFile) {
@@ -230,7 +253,7 @@ class BuildEngine(
             "--driver-mode=g++",
             "--target=aarch64-unknown-linux-android$TARGET_API",
             "--sysroot=${sysroot.absolutePath}",
-            "--ld-path=${toolchain.lldFile.absolutePath}"
+            "-Qunused-arguments"
         )
         val resourceDir = File(sysroot, "resource")
         if (resourceDir.isDirectory) args += "-resource-dir=${resourceDir.absolutePath}"
@@ -279,6 +302,11 @@ class BuildEngine(
         args += req.extraFlags
         args += listOf("-x", "c++-header", header.absolutePath, "-o", pch.absolutePath)
         return args
+    }
+
+    private fun looksLikePchProblem(output: String): Boolean {
+        val o = output.lowercase()
+        return "precompiled header" in o || ".pch" in o
     }
 
     /** Non-blank output lines, capped, for the build log. */

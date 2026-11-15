@@ -33,6 +33,8 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 import dev.mono.app.session.AppContainer
 import dev.mono.app.ui.ActionChip
+import dev.mono.app.ui.ActionMenu
+import dev.mono.app.ui.MenuItem
 import dev.mono.app.ui.ConfirmDialog
 import dev.mono.app.ui.Hairline
 import dev.mono.app.ui.IconAction
@@ -108,6 +110,7 @@ fun HomeScreen(
                     Hairline(theme, Modifier.padding(start = 16.dp))
                 }
             }
+            if (recents.isNotEmpty()) item(key = "recent-gap") { Spacer(Modifier.height(28.dp)) }
             item(key = "projects-label") { SectionLabel("PROJECTS", theme) }
             if (projects.isEmpty()) {
                 item {
@@ -257,16 +260,23 @@ private fun ProjectRow(
             if (lastOpenedMs != null) {
                 MonoText(relativeTime(lastOpenedMs), theme, color = theme.textTertiary, fontSize = 11)
             }
-            IconAction(MonoIcons.More, theme.textTertiary, size = 16.dp) { menu = !menu }
-        }
-        MonoText("projects/${project.name}/main.cpp", theme, color = theme.textTertiary, fontSize = 11)
-        if (menu) {
-            Spacer(Modifier.height(6.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                ActionChip("rename", theme, onClick = onRename)
-                ActionChip("delete", theme, onClick = onDelete)
+            // The popup is anchored to THIS box, so it opens right under the dots.
+            Box {
+                IconAction(MonoIcons.More, theme.textTertiary, size = 16.dp) { menu = !menu }
+                if (menu) {
+                    ActionMenu(
+                        theme = theme,
+                        items = listOf(
+                            MenuItem("open") { menu = false; onOpen() },
+                            MenuItem("rename") { menu = false; onRename() },
+                            MenuItem("delete") { menu = false; onDelete() }
+                        ),
+                        onDismiss = { menu = false }
+                    )
+                }
             }
         }
+        MonoText("projects/${project.name}/main.cpp", theme, color = theme.textTertiary, fontSize = 11)
     }
 }
 

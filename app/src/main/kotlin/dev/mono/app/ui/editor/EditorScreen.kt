@@ -214,8 +214,12 @@ fun EditorScreen(
                     val chip = tab.state.diagnosticChip
                     if (chip != null) {
                         LaunchedEffect(chip) {
-                            kotlinx.coroutines.delay(4500)
+                            kotlinx.coroutines.delay(2500)
                             tab.state.diagnosticChip = null
+                        }
+                        // Typing or moving to another line dismisses it.
+                        LaunchedEffect(tab.state.textRevision, tab.state.caretLine) {
+                            if (tab.state.caretLine != chip.line) tab.state.diagnosticChip = null
                         }
                         Column(
                             Modifier
@@ -223,6 +227,7 @@ fun EditorScreen(
                                 .padding(8.dp)
                                 .background(theme.surface)
                                 .border(1.dp, theme.border)
+                                .clickable { tab.state.diagnosticChip = null }
                                 .padding(horizontal = 12.dp, vertical = 8.dp)
                         ) {
                             MonoText(
