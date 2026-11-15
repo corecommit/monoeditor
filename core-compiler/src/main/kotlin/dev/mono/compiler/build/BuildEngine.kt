@@ -110,7 +110,7 @@ class BuildEngine(
             )
             val pchKey = hashOf(
                 pchHeader.readText() + req.std.flag + req.opt.flag +
-                        req.extraFlags.joinToString(" ") + "pch-v1"
+                        req.extraFlags.joinToString(" ") + sysroot.absolutePath + "pch-v2"
             )
             val candidate = File(File(context.cacheDir, "pch"), pchKey).apply { mkdirs() }
             val pch = File(candidate, "mono_pch.h.pch")
@@ -119,10 +119,7 @@ class BuildEngine(
                 emit(BuildEvent.Log("pch: cached"))
             } else {
                 emit(BuildEvent.Phase(0.08f, "building precompiled header"))
-                val r = runClang(
-                    listOf("-x", "c++-header", pchHeader.absolutePath, "-o", pch.absolutePath),
-                    sysroot
-                )
+                val r = runClang(buildPchArgs(req, sysroot, pchHeader, pch), sysroot)
                 if (r.success && pch.isFile) {
                     pchFile = pch
                     emit(BuildEvent.Log("pch: built"))
@@ -157,7 +154,11 @@ class BuildEngine(
                     val first = r.diagnostics.firstOrNull()
                     val msg = if (first != null) {
                         "${first.file.substringAfterLast('/')}:${first.line}: ${first.message}"
-                    } else "compilation failed"
+                    } else {
+                        val raw = rawLines(r.output)
+                        raw.forEach { emit(BuildEvent.Log(it)) }
+                        pickErrorLine(raw) ?: "compilation failed"
+                    }
                     emit(finish(false, null, started, msg))
                     return@flow
                 }
@@ -168,10 +169,24 @@ class BuildEngine(
         // ---- link -------------------------------------------------------------
         currentCoroutineContext().ensureActive()
         emit(BuildEvent.Phase(0.85f, "linking"))
-        val linkR = runClang(buildLinkArgs(req, sysroot, objects, outFile), sysroot)
+        var linkR = runClang(buildLinkArgs(req, sysroot, objects, outFile, toolchain.lldFile), sysroot)
+        if ((!linkR.success || !outFile.isFile) && linkR.output.contains("generic driver")) {
+            // The bundled lld is a copy named libld_lld.so, so lld cannot tell
+            // which flavor to run as. Re-run it under the name "ld.lld".
+            val alias = toolchain.lldAlias()
+            if (alias != null) {
+                emit(BuildEvent.Log("link: retrying with ld.lld alias"))
+                linkR = runClang(buildLinkArgs(req, sysroot, objects, outFile, alias), sysroot)
+            }
+        }
         for (d in linkR.diagnostics) emit(BuildEvent.DiagnosticEvent(d))
         if (!linkR.success || !outFile.isFile) {
-            emit(finish(false, null, started, linkR.diagnostics.firstOrNull()?.message ?: "linking failed"))
+            val raw = rawLines(linkR.output)
+            raw.forEach { emit(BuildEvent.Log(it)) }
+            val msg = linkR.diagnostics.firstOrNull()?.message
+                ?: pickErrorLine(raw)
+                ?: "linking failed"
+            emit(finish(false, null, started, msg))
             return@flow
         }
         outFile.setExecutable(true)
@@ -190,13 +205,14 @@ class BuildEngine(
         message: String
     ): BuildEvent.Finished = BuildEvent.Finished(ok, binary, System.currentTimeMillis() - started, message)
 
-    private fun buildCompileArgs(
-        req: Request,
-        sysroot: File,
-        pch: File?,
-        src: File,
-        obj: File
-    ): List<String> {
+    /**
+     * Flags every clang invocation that parses C++ must share (compile AND
+     * precompiled header): driver mode, target, sysroot, resource dir,
+     * search paths, language standard, optimisation and -fPIE. A PCH built
+     * with different flags is rejected by clang, and one built without the
+     * sysroot cannot even find <cstdio>.
+     */
+    private fun commonCompileFlags(req: Request, sysroot: File): MutableList<String> {
         val args = mutableListOf(
             "--driver-mode=g++",
             "--target=aarch64-unknown-linux-android$TARGET_API",
@@ -219,6 +235,17 @@ class BuildEngine(
         args += req.std.flag
         args += req.opt.flag
         args += "-fPIE"
+        return args
+    }
+
+    private fun buildCompileArgs(
+        req: Request,
+        sysroot: File,
+        pch: File?,
+        src: File,
+        obj: File
+    ): List<String> {
+        val args = commonCompileFlags(req, sysroot)
         if (pch != null) {
             args += "-include-pch"
             args += pch.absolutePath
@@ -231,6 +258,24 @@ class BuildEngine(
         return args
     }
 
+    private fun buildPchArgs(req: Request, sysroot: File, header: File, pch: File): List<String> {
+        val args = commonCompileFlags(req, sysroot)
+        args += "-fno-color-diagnostics"
+        args += "-fno-caret-diagnostics"
+        args += "-fdiagnostics-absolute-paths"
+        args += req.extraFlags
+        args += listOf("-x", "c++-header", header.absolutePath, "-o", pch.absolutePath)
+        return args
+    }
+
+    /** Non-blank output lines, capped, for the build log. */
+    private fun rawLines(output: String): List<String> =
+        output.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.take(40).toList()
+
+    private fun pickErrorLine(lines: List<String>): String? =
+        lines.firstOrNull { it.contains("error", ignoreCase = true) || it.contains("undefined") }
+            ?: lines.firstOrNull()
+
     /**
      * Link flags mirror the compile step: same driver mode, target, sysroot,
      * --ld-path and crt/lib search paths, plus the libc++ link flags. Without
@@ -242,13 +287,14 @@ class BuildEngine(
         req: Request,
         sysroot: File,
         objects: List<File>,
-        outFile: File
+        outFile: File,
+        lld: File
     ): List<String> {
         val args = mutableListOf(
             "--driver-mode=g++",
             "--target=aarch64-unknown-linux-android$TARGET_API",
             "--sysroot=${sysroot.absolutePath}",
-            "--ld-path=${toolchain.lldFile.absolutePath}",
+            "--ld-path=${lld.absolutePath}",
             "-fuse-ld=lld"
         )
         val resourceDir = File(sysroot, "resource")

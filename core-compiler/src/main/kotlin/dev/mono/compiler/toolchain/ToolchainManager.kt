@@ -1,6 +1,7 @@
 package dev.mono.compiler.toolchain
 
 import android.content.Context
+import android.system.Os
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -62,6 +63,22 @@ class ToolchainManager(private val context: Context) {
 
     val toolchainDir: File get() = File(context.filesDir, "toolchain")
     val sysrootDir: File get() = File(toolchainDir, "sysroot")
+
+    /**
+     * lld picks its flavor (GNU / COFF / ...) from the name it is started
+     * under. The bundled copy is called libld_lld.so, which it does not
+     * recognise, so expose it through a symlink named "ld.lld". Returns null
+     * if the link cannot be created.
+     */
+    fun lldAlias(): File? = try {
+        val alias = File(toolchainDir, "bin/ld.lld")
+        alias.parentFile?.mkdirs()
+        alias.delete()
+        Os.symlink(lldFile.absolutePath, alias.absolutePath)
+        alias
+    } catch (t: Throwable) {
+        null
+    }
 
     val binariesPresent: Boolean
         get() = clangFile.canExecute()
