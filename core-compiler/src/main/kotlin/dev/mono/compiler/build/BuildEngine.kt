@@ -46,7 +46,9 @@ class BuildEngine(
         val opt: OptLevel = OptLevel.O0,
         val extraFlags: List<String> = emptyList(),
         val usePch: Boolean = true,
-        val pchIncludeLines: List<String> = emptyList()
+        val pchIncludeLines: List<String> = emptyList(),
+        /** Additional translation units linked into the same program. */
+        val extraSources: List<File> = emptyList()
     )
 
     fun build(req: Request): Flow<BuildEvent> = flow {
@@ -92,7 +94,7 @@ class BuildEngine(
         val objDir = File(buildDir, "obj").apply { mkdirs() }
         val outFile = File(buildDir, "program")
 
-        val tus = listOf(req.mainFile)
+        val tus = listOf(req.mainFile) + req.extraSources
         emit(BuildEvent.Started(tus.size))
 
         // Fingerprint of every file on the include path (user modules and

@@ -331,13 +331,14 @@ private fun MonoEditorContent(
         val endEntry = cache.layout(state, theme, textMeasurer, b.second.line)
         val textLeft = state.gutterWidthPx + padH(density)
         val handleOffset = with(density) { 3.dp.toPx() }
+        // Both handles hang below their line, exactly where they are drawn.
         val start = Offset(
             textLeft + startEntry.xAt(b.first.col) - state.scrollX,
             (b.first.line + 1) * state.lineHeightPx - state.scrollY + handleOffset
         )
         val end = Offset(
             textLeft + endEntry.xAt(b.second.col) - state.scrollX,
-            b.second.line * state.lineHeightPx - state.scrollY - handleOffset
+            (b.second.line + 1) * state.lineHeightPx - state.scrollY + handleOffset
         )
         return start to end
     }
@@ -518,8 +519,28 @@ private fun Modifier.pointerInputGestures(
         if (state.showHandles) {
             val handles = handlesAt()
             if (handles != null) {
-                if ((downPos - handles.first).getDistance() < handleHitRadius) handleDrag = 1
-                else if ((downPos - handles.second).getDistance() < handleHitRadius) handleDrag = 2
+                // Grab the NEAREST handle (not simply the first one in range).
+                val d1 = (downPos - handles.first).getDistance()
+                val d2 = (downPos - handles.second).getDistance()
+                val grabbed = when {
+                    d1 < handleHitRadius && d1 <= d2 -> 1
+                    d2 < handleHitRadius -> 2
+                    else -> 0
+                }
+                val b = state.selectionBounds()
+                if (grabbed != 0 && b != null) {
+                    handleDrag = grabbed
+                    // The handle that was NOT grabbed becomes the fixed anchor
+                    // and the grabbed one becomes the moving caret. Handles are
+                    // ordered by position, but anchor/caret are not, so without
+                    // this the opposite handle moved whenever the selection had
+                    // been made right-to-left.
+                    val fixed = if (grabbed == 1) b.second else b.first
+                    val moving = if (grabbed == 1) b.first else b.second
+                    state.anchorLine = fixed.line
+                    state.anchorCol = fixed.col
+                    state.setCaret(moving.line, moving.col)
+                }
             }
         }
 
@@ -573,12 +594,7 @@ private fun Modifier.pointerInputGestures(
 
             if (handleDrag != 0) {
                 val target = charPosAt(pos)
-                if (handleDrag == 1) {
-                    state.anchorLine = target.line
-                    state.anchorCol = target.col
-                } else {
-                    controller.updateSelectionTo(target.line, target.col)
-                }
+                controller.updateSelectionTo(target.line, target.col)
                 edgeAutoScroll(pos)
                 moved = true
             } else if (moved) {
@@ -890,11 +906,11 @@ private fun DrawScope.drawEditor(
         val endEntry = cache.layout(state, theme, textMeasurer, sel.second.line)
         val start = Offset(
             textLeftX + startEntry.xAt(sel.first.col) - state.scrollX,
-            (sel.first.line + 1) * lineH - state.scrollY + with(density) { 4.dp.toPx() }
+            (sel.first.line + 1) * lineH - state.scrollY + with(density) { 3.dp.toPx() }
         )
         val end = Offset(
             textLeftX + endEntry.xAt(sel.second.col) - state.scrollX,
-            sel.second.line * lineH - state.scrollY - with(density) { 4.dp.toPx() }
+            (sel.second.line + 1) * lineH - state.scrollY + with(density) { 3.dp.toPx() }
         )
         val r = with(density) { 5.5.dp.toPx() }
         drawCircle(theme.selectionHandle, r, center = start)

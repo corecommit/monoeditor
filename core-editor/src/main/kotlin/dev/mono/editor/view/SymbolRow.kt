@@ -17,6 +17,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.layout.size
+import androidx.compose.runtime.rememberUpdatedState
 import kotlinx.coroutines.withTimeoutOrNull
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
@@ -195,6 +196,9 @@ private enum class ArrowDir { LEFT, UP, DOWN, RIGHT }
 @Composable
 private fun ArrowKey(dir: ArrowDir, theme: MonoTheme, onStep: () -> Unit) {
     val color: Color = theme.textPrimary
+    // pointerInput below is keyed only by direction, so it must read the
+    // latest callback; otherwise it keeps driving the first tab's controller.
+    val step by rememberUpdatedState(onStep)
     Box(
         contentAlignment = Alignment.Center,
         modifier = Modifier
@@ -204,14 +208,14 @@ private fun ArrowKey(dir: ArrowDir, theme: MonoTheme, onStep: () -> Unit) {
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
                     down.consume()
-                    onStep()
+                    step()
                     var released = false
                     withTimeoutOrNull(350L) {
                         waitForUpOrCancellation()
                         released = true
                     }
                     while (!released) {
-                        onStep()
+                        step()
                         withTimeoutOrNull(45L) {
                             waitForUpOrCancellation()
                             released = true

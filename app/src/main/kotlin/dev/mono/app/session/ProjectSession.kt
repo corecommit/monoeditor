@@ -342,7 +342,10 @@ class ProjectSession(
                 return@launch
             }
 
-            buildLog.add("building ${staged.entryName}")
+            buildLog.add(
+                "building ${staged.entryName}" +
+                    if (staged.extraSources.isNotEmpty()) " + " + staged.extraSources.joinToString(", ") { it.name } else ""
+            )
             val req = dev.mono.compiler.build.BuildEngine.Request(
                 projectName = project.name,
                 mainFile = staged.mainFile,
@@ -351,7 +354,8 @@ class ProjectSession(
                 opt = OptLevel.fromFlag(settings.optLevel),
                 extraFlags = settings.extraFlags.trim().split(Regex("\\s+")).filter { it.isNotBlank() },
                 usePch = settings.usePch,
-                pchIncludeLines = settings.pchIncludes.lines().map { it.trim() }.filter { it.isNotBlank() }
+                pchIncludeLines = settings.pchIncludes.lines().map { it.trim() }.filter { it.isNotBlank() },
+                extraSources = staged.extraSources
             )
 
             var success = false
@@ -408,12 +412,14 @@ class ProjectSession(
         val modulesDir: File,
         val projectDir: File,
         /** File name that is compiled and run (main.cpp unless another source is open). */
-        val entryName: String
+        val entryName: String,
+        /** Other project .cpp files that get compiled and linked with the entry. */
+        val extraSources: List<File> = emptyList()
     )
 
     private fun isSourceFile(name: String): Boolean {
         val ext = name.substringAfterLast('.', "").lowercase()
-        return ext == "cpp" || ext == "cc" || ext == "cxx" || ext == "c++"
+        return ext == "cpp" || ext == "cc" || ext == "cxx" || ext == "c++" || ext == "c"
     }
 
     /** Copies sources + modules into cache so clang gets plain File paths. */
@@ -435,13 +441,37 @@ class ProjectSession(
             repository.read(m.path)?.let { File(modulesDir, m.name).writeText(it) }
         }
 
-        // Entry point: the open source file when it belongs to this project,
-        // otherwise main.cpp (e.g. a header or a module is in front).
+        // Entry point: the source file that is open in the editor, whether it
+        // lives in this project or in the shared modules folder. Headers and
+        // anything else fall back to main.cpp.
+        val openName = entryPath?.substringAfterLast('/')
         val inProject = entryPath != null && entryPath.startsWith("projects/${project.name}/")
-        val entryName = entryPath?.substringAfterLast('/')
-            ?.takeIf { inProject && isSourceFile(it) && File(projectDir, it).isFile }
-            ?: "main.cpp"
-        return Staged(File(projectDir, entryName), modulesDir, projectDir, entryName)
+        val inModules = entryPath != null && entryPath.startsWith("modules/")
+        val entryFile: File = when {
+            openName != null && inProject && isSourceFile(openName) && File(projectDir, openName).isFile ->
+                File(projectDir, openName)
+            openName != null && inModules && isSourceFile(openName) && File(modulesDir, openName).isFile ->
+                File(modulesDir, openName)
+            else -> File(projectDir, "main.cpp")
+        }
+
+        // Link the project's other .cpp files too, so a multi-file project
+        // runs. Skip files that define their own main() and files that are
+        // pulled in with #include (the "module .cpp" style), otherwise they
+        // would be defined twice.
+        val projectSources = projectDir.listFiles()
+            ?.filter { it.isFile && isSourceFile(it.name) && it.absolutePath != entryFile.absolutePath }
+            .orEmpty()
+        val allText = (projectSources + entryFile).joinToString("\n") { it.readText() }
+        val mainRe = Regex("""\bmain\s*\(""")
+        val extras = if (entryFile.parentFile?.absolutePath == projectDir.absolutePath) {
+            projectSources.filter { f ->
+                !mainRe.containsMatchIn(f.readText()) &&
+                    !Regex("""#\s*include\s*[<"][^>"]*${Regex.escape(f.name)}[>"]""").containsMatchIn(allText)
+            }.sortedBy { it.name }
+        } else emptyList()
+
+        return Staged(entryFile, modulesDir, projectDir, entryFile.name, extras)
     }
 
     // ----------------------------------------------------------------- run
