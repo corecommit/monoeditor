@@ -1,160 +1,269 @@
-# Mono
+<div align="center">
 
-A minimalistic on-device C++ editor and compiler for Android. One shade
-system, zero hues: near-black layers, soft gray text, white reserved for the
-active line and the caret.
+<br>
+
+# `Mono`
+
+### A C++ studio that lives in your pocket.
+
+Write, build and run C++ entirely on your phone — no PC, no Termux, no cloud.<br>
+Black, white and every shade between. Nothing else.
+
+<br>
+
+[![Build](https://img.shields.io/github/actions/workflow/status/corecommit/monoeditor/build.yml?branch=main&style=for-the-badge&logo=githubactions&logoColor=white&label=build&labelColor=1f2328&color=2ea043)](https://github.com/corecommit/monoeditor/actions)
+[![Release](https://img.shields.io/github/v/release/corecommit/monoeditor?style=for-the-badge&logo=github&logoColor=white&label=release&labelColor=1f2328&color=0969da&include_prereleases)](https://github.com/corecommit/monoeditor/releases)
+[![Downloads](https://img.shields.io/github/downloads/corecommit/monoeditor/total?style=for-the-badge&logo=android&logoColor=white&label=downloads&labelColor=1f2328&color=8250df)](https://github.com/corecommit/monoeditor/releases)
+[![Stars](https://img.shields.io/github/stars/corecommit/monoeditor?style=for-the-badge&logo=github&logoColor=white&labelColor=1f2328&color=e3b341)](https://github.com/corecommit/monoeditor/stargazers)
+
+![Android](https://img.shields.io/badge/Android-8.0%2B-3DDC84?style=flat-square&logo=android&logoColor=black)
+![Arch](https://img.shields.io/badge/arch-arm64--v8a-0091BD?style=flat-square&logo=arm&logoColor=white)
+![Kotlin](https://img.shields.io/badge/Kotlin-2.0-7F52FF?style=flat-square&logo=kotlin&logoColor=white)
+![Compose](https://img.shields.io/badge/Jetpack%20Compose-Canvas-4285F4?style=flat-square&logo=jetpackcompose&logoColor=white)
+![C++](https://img.shields.io/badge/C%2B%2B-11%20to%2023-00599C?style=flat-square&logo=cplusplus&logoColor=white)
+![LLVM](https://img.shields.io/badge/LLVM-clang%20%2B%20lld-262D3A?style=flat-square&logo=llvm&logoColor=white)
+
+<br>
+
+[**Download**](https://github.com/corecommit/monoeditor/releases) &nbsp;|&nbsp;
+[**Features**](#features) &nbsp;|&nbsp;
+[**Quick start**](#quick-start) &nbsp;|&nbsp;
+[**Modules**](#your-own-modules) &nbsp;|&nbsp;
+[**Build it**](#build-from-source) &nbsp;|&nbsp;
+[**How it works**](#how-it-works)
+
+<br>
+
+</div>
+
+---
+
+## Why Mono?
+
+Most phone "code editors" either can't compile, or hand your code to a server. Mono ships a real **Clang/LLVM toolchain inside the APK**, so pressing run compiles and runs your program on the device itself — offline, fast, and private.
+
+And it looks like nothing else on your phone: one shade system, zero hues. Near-black layers, soft grey text, and pure white reserved for the line you're on and your caret.
+
+<div align="center">
+
+| | |
+|:---:|:---|
+| **Offline** | Compiles with Clang on-device. No internet needed after install. |
+| **Fast** | Incremental builds, object cache and precompiled-header cache. |
+| **Yours** | Projects are plain files — edit them from the system Files app too. |
+| **Calm** | Minimal UI, monochrome highlighting, optional focus mode. |
+
+</div>
+
+---
 
 ## Features
 
-- **Custom-rendered editor** on a Compose Canvas (no TextField anywhere):
-  animated caret glide with soft blink, inertial fling scrolling, drag
-  selection handles, pinch-to-zoom font size, line-number gutter that dims
-  away from the caret, auto-indent, bracket pairing/matching, undo/redo,
-  find/replace with regex, and efficient incremental rendering for files of
-  10k+ lines.
-- **Monochrome syntax highlighting** for C++ — keywords, types, preprocessor,
-  strings, numbers, comments and calls distinguished only by brightness,
-  weight and italics.
-- **Symbol row** above the keyboard (`{ } ( ) [ ] ; : < > * & -> # " '`),
-  swipe up for the extras palette (tab, arrows, operators).
-- **User modules**: drop `.cpp`/`.h` files into the shared `modules/` folder
-  (Modules drawer: create, rename, delete, import from the Files app) and
-  use them from any project with `#include <module.h>` or
-  `#include <module.cpp>` — Mono adds `modules/` to the compiler include
-  path. Each module gets its own symbol index; autocomplete only offers the
-  symbols of the modules (and STL headers) the current file actually
-  includes, grouped by module with type and signature. Background re-index
-  on change, include-guard reminders, and a clear "module not found" error.
-- **Files app integration**: everything lives under `Mono/projects/<name>/`
-  and `Mono/modules/` and is exposed through a DocumentsProvider (SAF root
-  "Mono"), so you can browse, edit, rename and delete files from the system
-  Files app or any other editor — changes show up in Mono live. Optional
-  setting to work directly against a shared `Documents/Mono` tree instead.
-- **On-device compiling** with a bundled Clang/LLVM toolchain: incremental
-  builds (content-hash object cache), precompiled-header cache, builds on a
-  background dispatcher, thin progress line, diagnostics as faint underlines
-  (tap to read, tap in Issues to jump), sliding output panel, run console
-  with stdin, streamed stdout/stderr, stop button and timeout.
-- **Settings**: C++ standard (11–23), optimization level, extra flags,
-  prefix header, run timeout, autosave interval, theme, storage mode.
-- **Focus mode** hides every UI element except the code.
+<table>
+<tr>
+<td width="50%" valign="top">
 
-## Building
+### Editor built from scratch
+No `TextField` anywhere — the whole editor is drawn on a Compose Canvas.
 
-Requirements: JDK 17, Android SDK with platform 34. The Gradle wrapper is
-included (Gradle 8.7, AGP 8.4.2, Kotlin 2.0.0).
+- Smooth caret glide with a soft blink
+- Inertial fling scrolling
+- Drag selection handles
+- Pinch-to-zoom font size
+- Line numbers that fade away from the caret
+- Auto-indent, bracket pairing and matching
+- Undo / redo, find & replace (with regex)
+- Stays smooth on files with 10k+ lines
 
-```bash
-./gradlew assembleDebug          # debug APK
-./gradlew assembleRelease        # release APK (debug-signed by default)
+</td>
+<td width="50%" valign="top">
+
+### Monochrome highlighting
+Keywords, types, preprocessor, strings, numbers, comments and calls are told apart only by **brightness, weight and italics** — never by colour.
+
+### Built for thumbs
+- Symbol row above the keyboard: `{ } ( ) [ ] ; : < > * & -> # " '`
+- Always-visible **left / up / down / right** arrow keys (hold to repeat)
+- `tab` key, plus swipe up the row for operators and `untab`
+- Backspace removes a **whole indent** at once
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+### On-device compiling
+- Real Clang + lld, bundled in the app
+- Content-hash object cache — unchanged code isn't rebuilt
+- Precompiled-header cache (self-heals if it goes stale)
+- Diagnostics as faint underlines — tap to read the message, tap in **Issues** to jump to it
+- Run console with stdin, live stdout/stderr, stop button and timeout
+
+</td>
+<td width="50%" valign="top">
+
+### Smart autocomplete
+- Per-module symbol index, built in the background
+- Suggestions come only from the headers and modules the file **actually includes**
+- Grouped by module, with type and signature
+- Curated STL index, snippets and fuzzy matching
+- Clear "module not found" errors
+
+</td>
+</tr>
+</table>
+
+### More
+
+- **Files app integration** — everything lives in `Mono/projects` and `Mono/modules`, exposed as a system Files root. Edit, rename or delete from any app; changes appear in Mono live.
+- **Settings** — C++ standard (11 to 23), optimization level, extra flags, prefix header, run timeout, autosave interval, theme and storage mode.
+- **Focus mode** — hides every piece of UI except your code.
+
+---
+
+## Quick start
+
+1. **Install** the APK from [Releases](https://github.com/corecommit/monoeditor/releases).
+2. Open Mono — the **toolchain** card at the top should say `clang ready`. On first launch it unpacks the headers, so give it a moment.
+3. Tap **new project**, give it a name, and you're in `main.cpp`.
+4. Tap the **run** button. Build output appears in the sliding panel (`build`, `run`, `issues`).
+
+```cpp
+#include <iostream>
+
+int main() {
+    std::cout << "Hello from my phone!\n";
+}
 ```
 
-APK output: `app/build/outputs/apk/debug/app-debug.apk`.
+> **Tip:** the three-dot menu on a project opens a small menu with *open*, *rename* and *delete*.
 
-The app itself contains no C/C++ sources, so the Android NDK is not required
-for a plain build; the CI workflow installs it anyway so forks that add JNI
-code work out of the box.
+---
 
-## The on-device toolchain
+## Your own modules
 
-Android 10+ (targetSdk 29+) forbids executing binaries from app-writable
-storage, so Mono packages the compiler as native libraries: `clang` and
-`ld.lld` are renamed `libclang.so` / `libld_lld.so`, placed in
-`app/src/main/jniLibs/arm64-v8a`, and extracted by the installer into
-`nativeLibraryDir`, where exec is allowed (`extractNativeLibs=true` /
-`useLegacyPackaging`). Headers, crt objects and libc++ ship as
-`assets/toolchain/sysroot.zip` with a sha256 manifest, unpacked and verified
-on first launch.
+Drop `.cpp` / `.h` files into the shared `modules/` folder (or use the **Modules drawer** to create, rename, delete and import files from the Files app). Every project can then use them:
 
-Since the NDK only ships x86_64-hosted compilers, Mono provisions
-**aarch64-hosted clang** from the Termux package repository (officially
-built Android clang) plus the bionic sysroot:
-
-```bash
-./toolchain/setup-toolchain.sh    # provisions jniLibs + assets, then rebuild
+```cpp
+#include <mymath.h>      // works
+#include <mymath.cpp>    // also works
 ```
 
-- Needs `curl`, `ar` (binutils), `tar`, `readelf`, `zstd`, `xz`, `zip`,
-  `python3`; `patchelf` additionally when a dependency carries a versioned
-  soname (the script renames the file to `lib*.so` and patches every NEEDED
-  reference to it).
-- Environment overrides: `TERMUX_MIRROR`, `SKIP_SYSROOT=1`.
-- Writes:
-  - `app/src/main/jniLibs/arm64-v8a/` — compiler + dependency libraries
-  - `app/src/main/assets/toolchain/` — sysroot.zip, manifest.json, info.json
-  - `toolchain/work/sysroot-only.zip` — standalone archive for the in-app
-    download (Settings → Toolchain → URL), useful for APKs built without
-    the assets.
-
-A fresh clone builds and runs **without** running the script — the app then
-shows a clear toolchain status card (and the editor, modules and settings
-work fully); compilation needs a toolchain-enabled build.
-
-Runtime wiring (for reference): `LD_LIBRARY_PATH` and `PATH` point at
-`nativeLibraryDir`; the sysroot is passed via `--sysroot`, the resource dir
-via `-resource-dir`, and the linker via `--ld-path` (which is why renamed
-executables still work). Modules resolve through `-I <modules>` so angle
-brackets and quoted includes both find user files.
-
-Compiled programs link against the bundled `libc++_shared.so` and run
-against it from `nativeLibraryDir` (the only place targetSdk 29+ allows
-executable mappings from). Because targetSdk 29+ also blocks `execve()`
-on app-data files, Mono launches built programs through
-`/system/bin/linker64 <binary>`, with a direct exec as the fallback and a
-clear console error if both fail.
-
-## CI
-
-`.github/workflows/build.yml`:
-
-- triggers: push to `main`, pull requests, `workflow_dispatch`, tags `v*`;
-- Ubuntu runner, JDK 17 (Temurin), Android SDK 34 + NDK, Gradle 8.7 with
-  caching, wrapper bootstrap guard;
-- runs the toolchain provisioning script, which renames/patches every
-  jniLibs entry to the extractable `lib*.so` form and verifies the result
-  (file naming, ELF64/AArch64, dependency closure, libc++ presence,
-  sysroot contents) with a printed summary — the build **fails** if the
-  toolchain cannot be provisioned or verified;
-- builds the debug APK on every run and a release APK on tags; signs with
-  the secrets `KEYSTORE_BASE64`, `KEY_ALIAS`, `KEY_PASSWORD` when present,
-  otherwise a fresh CI-generated keystore;
-- uploads APK (and toolchain archive) as artifacts; on tags, creates a
-  GitHub Release with the APK attached.
-
-## Architecture
-
-| Module | Responsibility |
-| --- | --- |
-| `:app` | UI: home, editor screen, modules drawer, output panel, settings, session glue |
-| `:core-editor` | Canvas editor: text buffer, undo/redo, gestures, rendering, IME bridge, completion popup, symbol row, find bar |
-| `:core-indexer` | Pure-Kotlin C++ lexer, symbol parser, per-module index, curated STL index, fuzzy matcher, snippets |
-| `:core-compiler` | Toolchain manager (locate/verify/extract/download), incremental build engine + PCH, diagnostics parser, process runner |
-| `:core-storage` | Project/module repository (internal + SAF shared roots), settings, storage watcher, DocumentsProvider |
-
-Dependencies point strictly downward: `app → all`, `editor → indexer`,
-`compiler → nothing`, `storage → nothing`, `indexer → coroutines only`.
-
-## Storage layout
+Mono adds `modules/` to the compiler include path, indexes each module separately, and offers its symbols in autocomplete. Edit a module and every project that uses it is rebuilt automatically.
 
 ```
 Mono/
-├── projects/<name>/main.cpp      (and any extra files you add)
-└── modules/                      (shared, include-path for every project)
+├── projects/
+│   └── <name>/
+│       └── main.cpp        (+ any extra files)
+└── modules/                (shared by every project)
 ```
 
-Internal mode lives in app storage and is exposed to the Files app through
-the `Mono` SAF root; shared mode points at a user-picked `Documents/Mono`
-tree. Switching does not move or delete anything, and `allowBackup` keeps
-data across app updates. Autosave runs every few seconds while editing.
+---
 
-## Notes and limitations
+## Build from source
 
-- On-device compilation targets `arm64-v8a` only (the overwhelming majority
-  of devices).
-- The toolchain script depends on third-party package repositories
-  (Termux). If their layout changes, the script fails loudly and the CI
-  fails with it rather than shipping an APK with a broken toolchain.
-- The symbol parser is a fast heuristic, not a full C++ front-end; template
-  metaprogramming corners may index imperfectly.
-- The bundled compiler binaries are Apache-2.0/LLVM-licensed builds; if you
-  redistribute the toolchain-enabled APK, respect those licenses.
+**Requirements:** JDK 17 and the Android SDK (platform 34). The Gradle wrapper is included (Gradle 8.7, AGP 8.4.2, Kotlin 2.0.0).
+
+```bash
+./gradlew assembleDebug      # output: app/build/outputs/apk/debug/app-debug.apk
+./gradlew assembleRelease    # release APK (debug-signed unless you add a keystore)
+```
+
+A fresh clone builds and runs **without** a compiler — the editor, modules and settings all work, and the toolchain card tells you what's missing. To get a build that can actually compile C++, provision the toolchain first:
+
+```bash
+./toolchain/setup-toolchain.sh     # downloads clang + sysroot, then rebuild
+```
+
+<details>
+<summary><b>Toolchain script details</b></summary>
+
+<br>
+
+- Needs `curl`, `ar` (binutils), `tar`, `readelf`, `zstd`, `xz`, `zip`, `python3` — and `patchelf` when a dependency has a versioned soname.
+- Environment overrides: `TERMUX_MIRROR`, `SKIP_SYSROOT=1`.
+- Writes:
+  - `app/src/main/jniLibs/arm64-v8a/` — compiler and its libraries
+  - `app/src/main/assets/toolchain/` — `sysroot.zip`, `manifest.json`, `info.json`
+  - `toolchain/work/sysroot-only.zip` — standalone archive for the in-app download (**Settings > Toolchain > URL**)
+
+</details>
+
+### Continuous integration
+
+`.github/workflows/build.yml` runs on pushes to `main`, pull requests, manual dispatch and `v*` tags. It provisions and **verifies** the toolchain (the build fails rather than ship a broken one), builds a debug APK every run and a release APK on tags, signs with `KEYSTORE_BASE64` / `KEY_ALIAS` / `KEY_PASSWORD` if you set them, uploads the artifacts, and attaches the APK to a GitHub Release on tags.
+
+---
+
+## How it works
+
+<details>
+<summary><b>Why the compiler is packaged as <code>.so</code> files</b></summary>
+
+<br>
+
+Android 10+ (targetSdk 29+) refuses to execute binaries from app-writable storage. So Mono ships `clang` and `ld.lld` renamed to `libclang.so` and `libld_lld.so` in `jniLibs/arm64-v8a`. The installer extracts them to `nativeLibraryDir`, where execution is allowed. Headers, crt objects and libc++ ship as `assets/toolchain/sysroot.zip` with a sha256 manifest and are unpacked and verified on first launch.
+
+The NDK only provides x86_64-hosted compilers, so the script pulls **aarch64-hosted Clang** (built for Android) and the bionic sysroot from the Termux package repository.
+
+</details>
+
+<details>
+<summary><b>How programs are run</b></summary>
+
+<br>
+
+Built programs link against the bundled `libc++_shared.so` and load it from `nativeLibraryDir`. Because targetSdk 29+ also blocks `execve()` on app-data files, Mono launches them through `/system/bin/linker64 <binary>`, falling back to a direct exec and showing a clear console error if both fail.
+
+</details>
+
+<details>
+<summary><b>Build pipeline</b></summary>
+
+<br>
+
+1. Check the toolchain, sysroot and `libc++_shared.so`.
+2. Build (or reuse) a precompiled header, keyed by its contents and the compile flags.
+3. Compile `main.cpp` to an object file, cached by a hash of the source, the flags **and every file on the include path**.
+4. Link with lld and run.
+
+If clang ever rejects a cached precompiled header, Mono deletes it and compiles without instead of failing your build.
+
+</details>
+
+### Architecture
+
+| Module | What it does |
+| :--- | :--- |
+| **`:app`** | Screens — home, editor, modules drawer, output panel, settings — and session glue |
+| **`:core-editor`** | Canvas editor: text buffer, undo/redo, gestures, rendering, IME bridge, completion popup, symbol row, find bar |
+| **`:core-indexer`** | Pure-Kotlin C++ lexer, symbol parser, per-module index, STL index, fuzzy matcher, snippets |
+| **`:core-compiler`** | Toolchain manager, incremental build engine + PCH, diagnostics parser, process runner |
+| **`:core-storage`** | Project and module repository, settings, storage watcher, DocumentsProvider |
+
+Dependencies point strictly downward: `app` depends on all modules, `editor` on `indexer`, `compiler` and `storage` on nothing, and `indexer` only on coroutines.
+
+---
+
+## Good to know
+
+- Compiling targets **arm64-v8a** only — the vast majority of phones.
+- The symbol parser is a fast heuristic, not a full C++ front-end, so exotic template code may index imperfectly.
+- The toolchain script relies on third-party package repositories (Termux). If their layout changes, the script — and CI — fails loudly instead of shipping a broken APK.
+- The bundled compiler is an Apache-2.0 / LLVM-licensed build. If you redistribute a toolchain-enabled APK, respect those licenses.
+
+---
+
+<div align="center">
+
+<br>
+
+**Mono** — made by [Equs](https://github.com/corecommit)
+
+<sub>Code in greyscale. Think in colour.</sub>
+<br>
+
+[![Made with Kotlin](https://img.shields.io/badge/made%20with-Kotlin-7F52FF?style=flat-square&logo=kotlin&logoColor=white)](https://kotlinlang.org)
+[![Powered by LLVM](https://img.shields.io/badge/powered%20by-LLVM-262D3A?style=flat-square&logo=llvm&logoColor=white)](https://llvm.org)
+</div>
